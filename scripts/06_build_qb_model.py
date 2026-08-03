@@ -17,7 +17,6 @@ import os
 import pathlib
 import shutil
 import sys
-from datetime import date
 
 # --- Stale-bytecode guard (important when the project lives in OneDrive) ------
 # OneDrive syncs the __pycache__ folder to the cloud and can restore an OLD .pyc
@@ -147,8 +146,10 @@ def main() -> None:
 
     meta = {
         "season": config.UPCOMING_SEASON, "season_label": season_label,
+        # The report appends "built <date & time>" to this line itself, shown in
+        # the reader's own timezone — so no generated-on date is needed here.
         "subline": f"QB index-blend · current teams & starters via depth charts · "
-                   f"{_scoring_label()} · generated {date.today().isoformat()}",
+                   f"{_scoring_label()}",
         "note": f"{len(result['payload'])} projected starters. Teams/starters from current depth charts; "
                 f"production from games through {config.CURRENT_SEASON}.",
     }

@@ -2,10 +2,12 @@
 HTML report for the QB index-blend model.
 
 `render(result, meta)` returns one self-contained HTML string (CSS + JS inlined,
-no storage). The only network requests are team logos and player headshots
-pulled from ESPN's image CDN; every one of them has a text fallback (team
-abbreviation / initials avatar), so with no internet the board still renders
-exactly as it did before images were added. The page has two tabs:
+no storage). It makes three kinds of network request, all optional: team logos
+and player headshots from ESPN's image CDN (each has a text fallback -- team
+abbreviation / initials avatar), and one small request for this page's own URL
+to check whether a newer build has been published (see "freshness check" in the
+script below). With no internet, all three fail quietly and the board renders
+exactly as it did before any of them existed. The page has two tabs:
 
   How it works  -- explains the model and shows the factor weighting (% of 100).
   QB Rankings   -- the board, with LIVE weight sliders: drag a factor's weight
@@ -17,11 +19,15 @@ All the math is embedded per QB as 0-100 factor indices plus a calibration
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 
 def render(result: dict, meta: dict) -> str:
     payload = {
         "meta": meta,
+        # When this file was generated, in UTC. The page prints it in the
+        # viewer's own timezone and uses it to spot a stale cached copy.
+        "built": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "qbs": result.get("payload", []),
         "weights": result.get("weights", {}),
         "groups": result.get("groups", []),
@@ -36,6 +42,14 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- GitHub Pages serves this file with "cache for 10 minutes" and gives us no
+     way to change that header, so a refresh straight after a rebuild can hand
+     you the previous board. These ask the browser to check with the server
+     every time instead of trusting its copy. Browsers honour them to varying
+     degrees, which is why the script also runs a freshness check on load. -->
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate, max-age=0">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>NFL QB Projection Model</title>
 <style>
   :root{
@@ -79,6 +93,22 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .tab[aria-selected="true"]{color:#fff;border-bottom-color:#fff}
   .toggle{border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);color:#fff;font:inherit;font-size:12px;font-weight:600;padding:6px 11px;border-radius:8px;cursor:pointer;transition:background .12s}
   .toggle:hover{background:rgba(255,255,255,.22)}
+  /* "a newer board is live" chip. Hidden unless the copy you're looking at is
+     genuinely older than the one on the server — see the freshness check. */
+  .fresh{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(12px);z-index:40;
+    display:none;align-items:center;gap:10px;background:var(--surface-1);color:var(--ink);
+    border:1px solid var(--border);border-radius:999px;padding:8px 9px 8px 18px;
+    box-shadow:0 2px 6px rgba(0,0,0,.10),0 18px 38px -16px rgba(0,0,0,.45);
+    font-size:13.5px;font-weight:600;opacity:0;transition:opacity .18s,transform .18s}
+  .fresh.show{display:flex;opacity:1;transform:translateX(-50%) translateY(0)}
+  .fresh button{font:inherit;border:0;border-radius:999px;cursor:pointer;white-space:nowrap}
+  .fresh .go{background:var(--accent);color:#fff;font-size:13px;font-weight:700;padding:7px 15px;flex:0 0 auto}
+  .fresh .go:hover{filter:brightness(1.08)}
+  .fresh .x{background:transparent;color:var(--muted);padding:5px 9px;font-size:16px;line-height:1}
+  .fresh .x:hover{color:var(--ink)}
+  @media(max-width:560px){.fresh{left:12px;right:12px;bottom:12px;justify-content:space-between;
+    padding-left:15px;font-size:13px}
+    .fresh,.fresh.show{transform:none}}
   section{display:none;padding-top:24px}section.active{display:block}
   .card{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);padding:22px 24px;margin:0 0 18px;box-shadow:var(--shadow)}
   h2{font-size:18px;font-weight:750;margin:0 0 12px;letter-spacing:-.015em}
@@ -131,14 +161,28 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .bdg.r{background:rgba(210,60,60,.18);color:var(--neg)}
   .bdg.n{background:var(--grid);color:var(--ink-2)}
   :root[data-theme="dark"] .bdg.a{color:#e6a93a}
-  .adpcell{font-variant-numeric:tabular-nums;font-weight:600}
-  .vtag{font-size:10px;font-weight:700;margin-left:5px;letter-spacing:.02em}
   .vt{font-size:9.5px;font-weight:800;padding:2px 7px;border-radius:20px;margin-left:6px;letter-spacing:.03em;vertical-align:middle;white-space:nowrap}
   .vt.g{background:rgba(0,120,60,.18);color:var(--good)}
   .vt.r{background:rgba(210,60,60,.18);color:var(--neg)}
+  /* Platform ADP cells, scored against the Market column: GREEN where that site
+     lets him fall 2+ QB spots LATER than the market (you get him cheaper — a
+     value), RED where it drafts him 2+ spots EARLIER (you'd be paying up — a
+     reach). Inside 2 spots stays plain text on purpose: only prices genuinely
+     out of step with the market should catch your eye. */
   .pfr{font-variant-numeric:tabular-nums;font-size:13px}
+  .pfr.val{color:var(--good);font-weight:700;background:rgba(0,120,60,.13);border-radius:7px;padding:2px 7px}
+  .pfr.rch{color:var(--neg);font-weight:700;background:rgba(210,60,60,.13);border-radius:7px;padding:2px 7px}
+  .pfr.e{color:var(--muted)}
+  /* the platform chosen in the "Drafting on" toggle — underlined rather than
+     recoloured, so the value/reach colour above still reads through it */
+  .pfr.sel,.selcol{text-decoration:underline;text-decoration-color:var(--accent);
+    text-decoration-thickness:2px;text-underline-offset:3px}
+  .pfr.sel{font-weight:700}
+  thead th.selcol{color:var(--ink)}
   th.mkt,td.mkt{border-left:1px solid var(--border)}
-  td.mkt{font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums}
+  th.mkt{color:var(--ink)}
+  /* Market is bold wherever it appears — it's what the site columns roll up into */
+  td.mkt{font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
   .whycol{max-width:180px;line-height:1.9}
   .fl{display:inline-block;font-size:10.5px;font-weight:700;border-radius:20px;padding:2px 9px;white-space:nowrap}
   .fl.g{background:rgba(0,120,60,.16);color:var(--good)}
@@ -177,6 +221,40 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .wf .v{font-size:12.5px;font-variant-numeric:tabular-nums}
   .feat{margin-top:16px}.feat table{font-size:13px}.feat td{padding:5px 10px;border-bottom:1px solid var(--border)}
   .feat .k{color:var(--ink-2)}.feat .v{text-align:right;font-variant-numeric:tabular-nums}
+  /* the ADP table inside a player's panel: one column per site, Market last and
+     bold. These rules sit after ".detail td" on purpose — same specificity, so
+     the later one wins and the nested table keeps its own padding. */
+  .adpt{width:auto;border-collapse:collapse;font-size:13px;margin:0 0 2px}
+  .adpt th,.adpt td{padding:5px 13px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap;background:none}
+  .adpt thead th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
+    font-weight:700;padding-bottom:7px;border-bottom:2px solid var(--border)}
+  .adpt .rh{text-align:left;font-weight:600;color:var(--ink-2);font-size:12.5px;
+    padding-left:0;text-transform:none;letter-spacing:0}
+  .adpt tbody tr:last-child th,.adpt tbody tr:last-child td{border-bottom:0}
+  .adpt td{font-variant-numeric:tabular-nums;color:var(--ink)}
+  .adpt .mk{border-left:1px solid var(--border);font-weight:800;color:var(--accent)}
+  .adpt thead th.mk{color:var(--ink)}
+  .adpt .e{color:var(--muted);font-weight:400}
+  .adpt .gd{color:var(--good);font-weight:700}
+  .adpt .bd{color:var(--neg);font-weight:700}
+  .adpt thead th.selcol{color:var(--ink)}
+  .adpcap{font-size:12px;color:var(--muted);margin-top:7px;max-width:600px;line-height:1.45}
+  /* "Similar QBs" — the backup-options layer */
+  .sim{margin:18px 0 2px}
+  .simcap{font-size:12.5px;color:var(--muted);margin:-2px 0 9px;max-width:640px;line-height:1.45}
+  .simgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(224px,1fr));gap:8px}
+  .simcard{display:block;text-align:left;font:inherit;cursor:pointer;width:100%;
+    background:var(--surface-1);border:1px solid var(--border);border-radius:11px;padding:9px 12px 10px;
+    transition:background .12s,border-color .12s}
+  .simcard:hover{background:var(--accent-soft);border-color:var(--accent)}
+  .simcard .nm{display:block;font-size:13.5px;font-weight:700;color:var(--ink)}
+  .simcard .nm .tm{color:var(--muted);font-size:12px;font-weight:600;margin-left:5px}
+  .simcard .mt{display:block;font-size:11.5px;color:var(--ink-2);margin-top:1px;font-variant-numeric:tabular-nums}
+  .simcard .cost{display:block;font-size:11.5px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
+  .simcard .cost.later{color:var(--good)}
+  .simcard .cost.earlier{color:var(--neg)}
+  .simcard .cost.same{color:var(--muted)}
+  .simdots{color:var(--accent);letter-spacing:1px;margin-left:6px;font-size:10px}
   .note{color:var(--muted);font-size:12.5px;margin-top:14px}
   .pill{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;margin-left:8px;background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.28);letter-spacing:.02em;vertical-align:middle}
   @media(max-width:640px){.wname{width:auto}}
@@ -304,6 +382,12 @@ _TEMPLATE = r"""<!DOCTYPE html>
   </section>
 </div>
 
+<div class="fresh" id="freshChip" role="status" aria-live="polite">
+  <span id="freshMsg">A newer board has been published.</span>
+  <button class="go" id="freshGo" type="button">Load it</button>
+  <button class="x" id="freshX" type="button" aria-label="Dismiss">&times;</button>
+</div>
+
 <script>
 const DATA = __DATA_JSON__;
 const $=s=>document.querySelector(s);
@@ -315,6 +399,59 @@ let weights=Object.assign({}, DATA.weights);
 $("#seasonPill").textContent=DATA.meta.season_label||"";
 $("#subline").textContent=DATA.meta.subline||"";
 $("#rnote").textContent=DATA.meta.note||"";
+
+/* --- build stamp + freshness check ---------------------------------------
+   Two problems, one answer.
+
+   (1) "Am I even looking at the new board?" -- the exact build time is now
+       printed in the header, in your timezone, so you never have to guess.
+   (2) "Why is it still the old one?" -- GitHub Pages tells your browser to
+       keep this page for 10 minutes and offers no way to change that header,
+       so a refresh right after a rebuild can legitimately hand you the
+       previous copy. Shortly after load we ask the server for the current
+       file with cache:"reload", which both skips the cache on the way out and
+       replaces the stored copy on the way back -- so your NEXT refresh is
+       fresh even if you ignore everything below. If the server's build stamp
+       is newer than ours we also offer a one-click jump to it; the ?v= on
+       that link is the guarantee, since the browser has never seen that URL
+       and so cannot answer it from cache.
+
+   It asks rather than reloading by itself on purpose: yanking the page out
+   from under you mid-draft, with your weight sliders tuned, would be rude.
+
+   Every step is guarded. Offline, opened from disk (file://), or a failed
+   request all end with no chip and no error in the console. */
+const BUILT = DATA.built || "";
+
+(function stampBuildTime(){
+  const d = BUILT ? new Date(BUILT) : null;
+  if(!d || isNaN(d)) return;
+  const sub = $("#subline");
+  sub.textContent = (sub.textContent ? sub.textContent + " · " : "") + "built " +
+    d.toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+  sub.title = "This page was generated " + d.toLocaleString();
+})();
+
+function freshCheck(){
+  if(!BUILT || !/^https?:$/.test(location.protocol)) return;   // nothing to check against
+  fetch(location.pathname, {cache:"reload"})
+    .then(r => r.ok ? r.text() : null)
+    .then(html => {
+      if(!html) return;
+      const m = html.match(/"built"\s*:\s*"([^"]+)"/);
+      if(!m || m[1] === BUILT) return;                       // already current
+      const theirs = new Date(m[1]), ours = new Date(BUILT);
+      if(isNaN(theirs) || theirs <= ours) return;            // server isn't newer
+      const chip = $("#freshChip");
+      $("#freshMsg").textContent = "A newer board was published " +
+        theirs.toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}) + ".";
+      $("#freshGo").onclick = () => location.replace(location.pathname + "?v=" + encodeURIComponent(m[1]));
+      $("#freshX").onclick  = () => chip.classList.remove("show");
+      chip.classList.add("show");
+    })
+    .catch(()=>{});
+}
+setTimeout(freshCheck, 1200);
 if(DATA.backtest && DATA.backtest.model_mae!=null){
   $("#btstat").innerHTML=`<div class="stat"><b>${fmt(DATA.backtest.model_mae,2)}</b><span>model error (MAE, pts/gm)</span></div>`+
     `<div class="stat"><b>${fmt(DATA.backtest.baseline_mae,2)}</b><span>last-year-repeats baseline</span></div>`+
@@ -386,9 +523,25 @@ let draftPlatform="consensus";
   }).filter(x=>x._mktScore!=null).sort((a,b)=>a._mktScore-b._mktScore);
   scored.forEach((x,i)=>{x._market=i+1;});   // clean market QB# 1..N
 })();
-function pfRank(x,pf){const r=x.adp_platforms&&x.adp_platforms[pf];
-  if(!r)return '<span class="pfr" style="color:var(--muted)">—</span>';
-  return `<span class="pfr"${pf===draftPlatform?' style="font-weight:700;color:var(--accent)"':''}>QB${r}</span>`;}
+/* How one site prices a QB against the Market column (Underdog + FFC).
+   gap = market − site.  NEGATIVE: the site lets him fall LATER than the market,
+   so he's cheaper there — a value. POSITIVE: the site drafts him EARLIER, so
+   you'd be paying up — a reach. Two QB spots is the cutoff either way. */
+function mktEdge(x,pf){
+  const mine=(x.adp_platforms&&x.adp_platforms[pf])??null, mkt=x._market??null;
+  if(mine==null||mkt==null)return {mine,mkt,gap:null,cls:"",word:""};
+  const gap=mkt-mine;
+  return {mine,mkt,gap,
+    cls:gap<=-2?"val":gap>=2?"rch":"",
+    word:gap<=-2?`falls ${-gap} QB spots later than the market here — value`
+        :gap>=2?`goes ${gap} QB spots earlier than the market here — reach`
+        :"in line with the market"};
+}
+function pfRank(x,pf){
+  const e=mktEdge(x,pf), sel=pf===draftPlatform?" sel":"";
+  if(e.mine==null)return `<span class="pfr e${sel}">—</span>`;
+  return `<span class="pfr ${e.cls}${sel}"${e.word?` title="${PLABEL[pf]||pf}: ${e.word}"`:""}>QB${e.mine}</span>`;
+}
 // Value/Reach is mode-aware: "consensus" = model vs the whole market; a platform =
 // that platform's price vs the MARKET column (Underdog + FFC blend). A player is a
 // reach on a platform when that platform drafts him EARLIER than the market, a value
@@ -418,20 +571,56 @@ function platEdgeLine(o){
 const FLAGCLS={up:"g",down:"r",warn:"a"};
 function flagChips(x){const f=x.flags||[];if(!f.length)return '<span class="mut" style="font-size:11px">—</span>';return f.map(t=>`<span class="fl ${FLAGCLS[t[0]]||'n'}">${t[1]}</span>`).join(" ");}
 const PF=PLATS.map(p=>[p,PLABEL[p]||p]);
-function adpBreakdown(o){return PF.map(([k,lab])=>{const r=o.adp_platforms&&o.adp_platforms[k],pk=o.adp_picks&&o.adp_picks[k];if(!r)return `<span style="color:var(--muted)">${lab} —</span>`;return `${lab} <b>QB${r}</b>${pk!=null?` <span style="color:var(--muted)">(${fmt(pk,0)})</span>`:''}`;}).join(' &nbsp;·&nbsp; ');}
-function valueByPlatform(o){if(!o.value_by_platform)return "";const parts=PF.filter(([k])=>o.value_by_platform[k]!=null).map(([k,lab])=>{const g=o.value_by_platform[k];const col=g>=5?'var(--good)':g<=-5?'var(--neg)':'var(--ink-2)';return `${lab} <span style="color:${col}">${g>0?'+':''}${g}</span>`;});return parts.length?`<div style="margin-top:5px;font-size:12.5px;color:var(--muted)">Model vs platform (QB spots, + = value): ${parts.join(' &nbsp; ')}</div>`:"";}
-function adpCell(x){
-  if(!x.adp_label||x.adp_label==="UDFA")return '<span class="adpcell" style="color:var(--muted);font-weight:400">UDFA</span>';
-  let tag="";
-  if(x.value_tag==="Value")tag=' <span class="vtag" style="color:var(--good)">▲VALUE</span>';
-  else if(x.value_tag==="Reach")tag=' <span class="vtag" style="color:var(--neg)">▼REACH</span>';
-  return `<span class="adpcell">${x.adp_label}</span>${tag}`;
-}
-function valueLine(o){
-  if(o.value_gap==null)return "";
-  if(o.value_gap>=5)return ` · <span style="color:var(--good)">model ${o.value_gap} spots higher — value</span>`;
-  if(o.value_gap<=-5)return ` · <span style="color:var(--neg)">model ${Math.abs(o.value_gap)} spots lower — reach</span>`;
-  return " · in line with the model";
+/* The draft-slot block, as one small table: a row per way of quoting the price,
+   a column per site, and Market last and bold because it's the number the site
+   columns roll up into. Cells carry the same green/red as the board. Every row
+   below the first is conditional, so a thin ADP file still renders tidily. */
+function adpTable(o){
+  const sel=k=>k===draftPlatform?" selcol":"";
+  const head=PF.map(([k,lab])=>`<th class="${sel(k).trim()}">${lab}</th>`).join("")+
+    (MKT_SRC.length?`<th class="mk" title="Market = Underdog (best-ball) and FFC (season-long) blended, then re-ranked">Market</th>`:"");
+  const mkCell=(inner,cls)=>MKT_SRC.length?`<td class="mk ${cls||""}">${inner}</td>`:"";
+
+  const rank=`<tr><th class="rh">Drafted at</th>`+
+    PF.map(([k])=>{const e=mktEdge(o,k);
+      return e.mine==null?'<td class="e">—</td>'
+        :`<td><span class="pfr ${e.cls}${sel(k)?" sel":""}">QB${e.mine}</span></td>`;}).join("")+
+    mkCell(o._market?`QB${o._market}`:"—",o._market?"":"e")+`</tr>`;
+
+  const pick=PF.some(([k])=>o.adp_picks&&o.adp_picks[k]!=null)
+    ?`<tr><th class="rh">Overall pick</th>`+
+      PF.map(([k])=>{const p=o.adp_picks&&o.adp_picks[k];
+        return p==null?'<td class="e">—</td>':`<td>${fmt(p,0)}</td>`;}).join("")+
+      mkCell("—","e")+`</tr>`
+    :"";
+
+  const vsMkt=(MKT_SRC.length&&o._market)
+    ?`<tr><th class="rh" title="Two QB spots either way is the cutoff">vs market</th>`+
+      PF.map(([k])=>{const e=mktEdge(o,k);
+        if(e.gap==null)return '<td class="e">—</td>';
+        if(e.gap<=-2)return `<td class="gd">${-e.gap} later</td>`;
+        if(e.gap>=2)return `<td class="bd">${e.gap} earlier</td>`;
+        return '<td class="e">in line</td>';}).join("")+
+      mkCell("—","e")+`</tr>`
+    :"";
+
+  const vb=o.value_by_platform||null;
+  const vsMod=(vb&&PF.some(([k])=>vb[k]!=null))
+    ?`<tr><th class="rh" title="Where my projection ranks him against that site's price. Five QB spots either way is the cutoff — a model edge needs to be bigger than a site-to-site wobble to mean anything.">vs my model</th>`+
+      PF.map(([k])=>{const g=vb[k];
+        if(g==null)return '<td class="e">—</td>';
+        if(g>=5)return `<td class="gd">${g} later</td>`;
+        if(g<=-5)return `<td class="bd">${-g} earlier</td>`;
+        return '<td class="e">in line</td>';}).join("")+
+      mkCell("—","e")+`</tr>`
+    :"";
+
+  return `<table class="adpt"><thead><tr><th class="rh"></th>${head}</tr></thead>
+      <tbody>${rank}${pick}${vsMkt}${vsMod}</tbody></table>
+    <div class="adpcap">Market blends Underdog and FFC — one neutral price spanning best-ball and
+      season-long. <b style="color:var(--good)">Green</b> means that site lets him fall <b>later</b>
+      than the market, so he's cheaper there; <b style="color:var(--neg)">red</b> means it drafts him
+      <b>earlier</b> and you'd be paying up.</div>`;
 }
 function riskWhy(o){
   if(!o.adp_pos_rank)return "undrafted — no cost, no risk";
@@ -444,7 +633,7 @@ function riskWhy(o){
 }
 function overlays(o){
   return `<div class="ov" style="margin:2px 0 16px">
-    <div class="ovh">Draft slot (ADP)</div><div>${adpBreakdown(o)}${o._market?` &nbsp;·&nbsp; <b style="color:var(--accent)">Market QB${o._market}</b>`:''}<div style="margin-top:3px">consensus <b>${o.adp_label||"UDFA"}</b>${valueLine(o)}</div>${valueByPlatform(o)}</div>
+    <div class="ovh">Draft slot (ADP)</div><div>${adpTable(o)}</div>
     ${platEdgeLine(o)}
     <div class="ovh">Floor</div><div>${bdg(o.floor_bucket,FCLS[o.floor_bucket])} <span style="color:var(--muted)">bad-week baseline ≈ ${fmt(o.floor_pts,1)} pts/gm</span></div>
     <div class="ovh">Ceiling</div><div>${bdg(o.ceiling_bucket,CCLS[o.ceiling_bucket])} <span style="color:var(--muted)">${o.boom25!=null?o.boom25:"–"}% of games 25+, ${o.boom30!=null?o.boom30:"–"}% 30+</span></div>
@@ -493,6 +682,78 @@ function shot(q){
   return `<div class="shot${q.headshot?"":" noshot"}">${img}`+
     `<span class="shotini">${initials(q.name)}</span>${badge}</div>`;}
 
+/* --- "Similar QBs": the backup-options layer ------------------------------
+   If he's already gone, or the price is too high, who does roughly the same
+   job? Similarity blends three things, and it is recomputed every time you
+   move a weight slider -- so the factors YOU care about are the factors that
+   decide who counts as similar:
+     * style     -- distance between the two 0-100 factor profiles, weighted by
+                    the same weights driving the projection
+     * output    -- how far apart the projections are (a 2 pts/gm gap is a
+                    different player even when the profile shape matches)
+     * archetype -- a small bonus for carrying the same label
+   The ORDER is deliberately NOT "most similar first": QBs going LATER than he
+   does float to the top, because a comparable QB you can still get is the
+   useful answer and one already off the board is not. */
+const SIM_N=5;
+function costRank(x){   // what he costs right now, on the site you're drafting on
+  if(draftPlatform!=="consensus"){
+    const r=x.adp_platforms&&x.adp_platforms[draftPlatform];
+    if(r!=null)return r;
+  }
+  return x._market!=null?x._market:(x.adp_pos_rank!=null?x.adp_pos_rank:null);
+}
+function simDist(a,b){
+  const s=sumW();
+  let style=0;
+  GROUPS.forEach(g=>{style+=(weights[g]||0)*Math.abs((a.indices[g]??50)-(b.indices[g]??50));});
+  style/=s;                                        // 0 = identical profile
+  const out=Math.abs((a._p||0)-(b._p||0));         // pts/gm apart
+  const same=a.archetype&&a.archetype===b.archetype;
+  return style + 6*out - (same?4:0);               // 1 pt/gm ~ 6 index points
+}
+function similarQBs(q){
+  const mine=costRank(q);
+  const pool=DATA.qbs.filter(x=>x!==q&&x.indices).map(x=>{
+    const c=costRank(x);
+    return {x,d:simDist(q,x),cost:c,later:(mine!=null&&c!=null)?c-mine:null};
+  });
+  pool.sort((p,r)=>{                                // still-gettable first, then closest
+    const pc=(p.later!=null&&p.later>=1)?0:1, rc=(r.later!=null&&r.later>=1)?0:1;
+    return (pc-rc)||(p.d-r.d);
+  });
+  const top=pool.slice(0,SIM_N);
+  if(!top.length)return "";
+  const where=(draftPlatform!=="consensus"&&PLABEL[draftPlatform])?PLABEL[draftPlatform]:"the market";
+  const cards=top.map(c=>{
+    const dots=c.d<12?3:c.d<24?2:1;
+    const meter=`<span class="simdots" title="${["loose match","similar","very similar"][dots-1]}">`+
+      "●".repeat(dots)+"○".repeat(3-dots)+"</span>";
+    const sp=n=>n===1?"spot":"spots";
+    let cost,cls,tip;
+    if(c.later==null){
+      cost=c.cost!=null?`QB${c.cost}`:"undrafted"; cls="same"; tip="no price to compare";
+    }else if(c.later>=1){
+      cost=`QB${c.cost} · ${c.later} ${sp(c.later)} later`; cls="later";
+      tip=`Goes ${c.later} QB ${sp(c.later)} later than ${q.name} on ${where} — you can still get him`;
+    }else if(c.later<=-1){
+      cost=`QB${c.cost} · ${-c.later} ${sp(-c.later)} earlier`; cls="earlier";
+      tip=`Off the board ${-c.later} QB ${sp(-c.later)} before ${q.name} on ${where}`;
+    }else{
+      cost=`QB${c.cost} · same spot`; cls="same"; tip="drafted in the same range";
+    }
+    return `<button class="simcard" type="button" data-goto="${c.x.rank}" title="${tip}">
+      <span class="nm">${c.x.name}<span class="tm">${c.x.team||""}</span></span>
+      <span class="mt">${c.x.archetype||"—"} · ${fmt(c.x._p)} pts/gm${meter}</span>
+      <span class="cost ${cls}">${cost}</span></button>`;
+  }).join("");
+  return `<div class="sim"><h3>Similar QBs — if he's gone or too pricey</h3>
+    <div class="simcap">Closest on style, factor mix and projected output at your current weights.
+      Anyone you can <b>still get</b> on ${where} is listed first, with how many QB spots later he
+      goes. Move the sliders and this re-sorts.</div>
+    <div class="simgrid">${cards}</div></div>`;
+}
+
 function detail(q,maxAbs){
   const pts0=Math.max(0,A+B*50), s=sumW();
   const contribs=GROUPS.map(g=>({g,c:B*((weights[g]||0)/s)*((q.indices[g]??50)-50),idx:q.indices[g]??50}));
@@ -509,6 +770,7 @@ function detail(q,maxAbs){
     <div style="text-align:right"><div class="big">${fmt(q._p)}<span style="font-size:13px;color:var(--muted);font-weight:400"> pts/gm</span></div>
       <div style="font-size:12px;color:var(--muted)">avg QB ≈ ${fmt(pts0)}</div></div></div>
     ${overlays(q)}
+    ${similarQBs(q)}
     <div class="legend"><span><span class="sw" style="background:var(--pos)"></span>boosts</span>
       <span><span class="sw" style="background:var(--neg)"></span>lowers</span>
       <span style="color:var(--muted)">middle column = 0–100 factor index</span></div>
@@ -532,7 +794,7 @@ function refresh(){
       <td class="qb"><b>${x.name}</b>${teamCell(x.team)}
         <span class="archtag">${x.archetype||""}</span>${x.mover?'<span class="move">NEW</span>':''}${valueTag(x)}</td>
       <td class="num"><span class="bartrack"><span class="bar" style="width:${w}px"></span></span>${fmt(x._p)}</td>
-      ${PLATS.map(p=>`<td class="num">${pfRank(x,p)}</td>`).join("")}
+      ${PLATS.map(p=>`<td class="num pf">${pfRank(x,p)}</td>`).join("")}
       ${MKT_SRC.length?`<td class="num mkt">${x._market?('QB'+x._market):'<span style="color:var(--muted)">—</span>'}</td>`:""}
       <td>${bdg(x.floor_bucket,FCLS[x.floor_bucket])}</td>
       <td>${bdg(x.ceiling_bucket,CCLS[x.ceiling_bucket])}</td>
@@ -545,12 +807,24 @@ function refresh(){
     const d=document.querySelector(`tr.detail[data-for="${tr.dataset.id}"]`);
     const open=d.style.display!=="none";d.style.display=open?"none":"table-row";tr.classList.toggle("open",!open);
   });
+  // a "similar QB" card jumps to that player's row and opens him. If the search
+  // box is currently hiding him, clear it first so there's something to jump to.
+  document.querySelectorAll(".simcard").forEach(b=>b.onclick=ev=>{
+    ev.stopPropagation();
+    const id=b.dataset.goto, find=()=>document.querySelector(`tr.row[data-id="${id}"]`);
+    let tr=find();
+    if(!tr && $("#search").value){ $("#search").value=""; refresh(); tr=find(); }
+    if(!tr)return;
+    const d=document.querySelector(`tr.detail[data-for="${id}"]`);
+    if(d && d.style.display==="none"){d.style.display="table-row";tr.classList.add("open");}
+    tr.scrollIntoView({behavior:"smooth",block:"center"});
+  });
   weightBars(); syncSliderLabels();
 }
 
 function header(){
-  const pf=PLATS.map(p=>`<th class="num" title="${PLABEL[p]||p} ADP, as a QB rank">${PLABEL[p]||p}</th>`).join("");
-  const mkt=MKT_SRC.length?`<th class="num mkt" title="Market = average of Underdog (best-ball) + FFC (season-long) QB ranks">Market</th>`:"";
+  const pf=PLATS.map(p=>`<th class="num${p===draftPlatform?" selcol":""}" title="${PLABEL[p]||p} ADP, as a QB rank — green where he falls later than the market, red where he goes earlier">${PLABEL[p]||p}</th>`).join("");
+  const mkt=MKT_SRC.length?`<th class="num mkt" title="Market = average of Underdog (best-ball) + FFC (season-long) QB ranks. The site columns are scored against this.">Market</th>`:"";
   $("#thead").innerHTML=`<tr><th class="num">#</th><th>Quarterback</th><th class="num">Proj</th>${pf}${mkt}`+
     `<th>Floor</th><th>Ceiling</th><th>Risk</th><th>Why</th><th></th></tr>`;
 }
@@ -561,7 +835,7 @@ $("#sortsel").onchange=e=>{sortMode=e.target.value;refresh();};
   PLATS.forEach(p=>{const o=document.createElement("option");o.value=p;o.textContent=(PLABEL[p]||p)+" ADP";
     $("#sortsel").insertBefore(o,anchor);});})();
 $("#platsel").innerHTML='<option value="consensus">Consensus</option>'+PLATS.map(p=>`<option value="${p}">${PLABEL[p]||p}</option>`).join("");
-$("#platsel").onchange=e=>{draftPlatform=e.target.value;refresh();};
+$("#platsel").onchange=e=>{draftPlatform=e.target.value;header();refresh();};
 $("#reset").onclick=()=>{weights=Object.assign({},DATA.weights);sliders();refresh();};
 header(); sliders(); weightBars(); refresh();
 </script>
