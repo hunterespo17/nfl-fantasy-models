@@ -2,7 +2,10 @@
 HTML report for the QB index-blend model.
 
 `render(result, meta)` returns one self-contained HTML string (CSS + JS inlined,
-no network, no storage). The page has two tabs:
+no storage). The only network requests are team logos and player headshots
+pulled from ESPN's image CDN; every one of them has a text fallback (team
+abbreviation / initials avatar), so with no internet the board still renders
+exactly as it did before images were added. The page has two tabs:
 
   How it works  -- explains the model and shows the factor weighting (% of 100).
   QB Rankings   -- the board, with LIVE weight sliders: drag a factor's weight
@@ -61,9 +64,12 @@ _TEMPLATE = r"""<!DOCTYPE html>
     --shadow:0 1px 2px rgba(0,0,0,.5),0 16px 34px -20px rgba(0,0,0,.8);}}
   *{box-sizing:border-box}
   body{margin:0;background:var(--plane);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased}
-  .wrap{max-width:1060px;margin:0 auto;padding:0 20px 80px}
+  /* The board needs ~1110px to show all 13 columns without a sideways scroll.
+     Prose stays narrow (long lines are hard to read); only the board goes wide. */
+  .wrap{max-width:1192px;margin:0 auto;padding:0 20px 80px}
+  #overview{max-width:1000px}
   header{position:sticky;top:0;z-index:5;background:linear-gradient(105deg,var(--brand),var(--brand-2));border-bottom:0;padding:16px 0 0;box-shadow:0 4px 18px -6px rgba(0,0,0,.35)}
-  .hgrid{max-width:1060px;margin:0 auto;padding:0 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .hgrid{max-width:1192px;margin:0 auto;padding:0 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
   h1{font-size:23px;margin:0;font-weight:800;letter-spacing:-.02em;color:var(--on-brand);text-transform:uppercase}
   .sub{color:rgba(255,255,255,.82);font-size:13px;margin:3px 0 0}
   .spacer{flex:1}
@@ -103,8 +109,21 @@ _TEMPLATE = r"""<!DOCTYPE html>
   tbody td{padding:12px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
   tbody tr.row{cursor:pointer;transition:background .12s}tbody tr.row:hover{background:var(--accent-soft)}
   .rank{font-variant-numeric:tabular-nums;color:var(--accent);font-weight:800;font-size:15px;width:32px}
-  .qb b{font-weight:700;font-size:14.5px}.qb .tm{color:var(--muted);font-size:12.5px;margin-left:3px;font-weight:600}
-  .archtag{display:inline-block;font-size:10.5px;font-weight:700;color:#fff;background:var(--arch);border-radius:20px;padding:2px 9px;margin-left:6px;letter-spacing:.02em}
+  /* Wide table: on a narrow screen it scrolls sideways instead of overflowing the
+     page. Names and badges never break mid-word — when the column gets tight the
+     badges drop to a second line, which is tidy; "Jayden / Daniels" is not. */
+  .tblwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .qb b{font-weight:700;font-size:14.5px;white-space:nowrap}.qb .tm{color:var(--muted);font-size:12.5px;margin-left:3px;font-weight:600}
+  /* team logo, with the text abbreviation as a fallback if the image can't load */
+  .tmwrap{display:inline-flex;align-items:center;vertical-align:middle;margin-left:7px}
+  .tmlogo{width:23px;height:23px;object-fit:contain;display:block}
+  .tmwrap .tm{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .tmwrap.nologo .tmlogo{display:none}
+  .tmwrap.nologo .tm{position:static;width:auto;height:auto;overflow:visible;clip-path:none}
+  /* dark surfaces swallow the dark-primary logos (Raiders, Steelers, Jets) — put them on a disc */
+  :root[data-theme="dark"] .tmlogo,:root[data-theme="dark"] .shotteam{background:rgba(255,255,255,.92);border-radius:50%;padding:1px}
+  @media(prefers-color-scheme:dark){:root[data-theme="auto"] .tmlogo,:root[data-theme="auto"] .shotteam{background:rgba(255,255,255,.92);border-radius:50%;padding:1px}}
+  .archtag{display:inline-block;font-size:10.5px;font-weight:700;color:#fff;background:var(--arch);border-radius:20px;padding:2px 9px;margin-left:6px;letter-spacing:.02em;white-space:nowrap}
   .move{display:inline-block;font-size:10.5px;font-weight:600;color:var(--neg);border:1px solid var(--neg);border-radius:20px;padding:0 6px;margin-left:6px}
   .bdg{display:inline-block;font-size:11px;font-weight:700;border-radius:20px;padding:2px 10px;white-space:nowrap;letter-spacing:.01em}
   .bdg.g{background:rgba(0,120,60,.18);color:var(--good)}
@@ -138,6 +157,14 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .detail td{background:var(--plane);padding:0}
   .dbox{padding:18px 20px 22px}
   .dhead{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+  /* headshot, with an initials avatar as the fallback */
+  .dhead .who{display:flex;align-items:center;gap:15px}
+  .shot{position:relative;flex:0 0 auto;width:66px;height:66px;border-radius:50%;background:var(--accent-soft);border:1px solid var(--border);display:grid;place-items:center}
+  .shotimg{width:100%;height:100%;border-radius:50%;object-fit:cover;object-position:center 14%;display:block}
+  .shot .shotini{display:none;font-size:21px;font-weight:800;color:var(--accent);letter-spacing:.02em}
+  .shot.noshot .shotimg{display:none}
+  .shot.noshot .shotini{display:block}
+  .shotteam{position:absolute;right:-5px;bottom:-3px;width:27px;height:27px;object-fit:contain;background:var(--surface-1);border-radius:50%;padding:2px;box-shadow:0 1px 4px rgba(0,0,0,.28)}
   .dhead .big{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}
   .legend{font-size:12px;color:var(--ink-2);display:flex;gap:14px;margin-bottom:8px}
   .sw{display:inline-block;width:10px;height:10px;border-radius:3px;vertical-align:middle;margin-right:5px}
@@ -271,7 +298,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
       </div>
     </div>
     <div class="card" style="padding:14px 16px">
-      <table id="tbl"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+      <div class="tblwrap"><table id="tbl"><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
     </div>
     <p class="note" id="rnote"></p>
   </section>
@@ -441,6 +468,31 @@ function sortCmp(m){
 })[m]||((a,b)=>b._p-a._p);}
 let sortMode="proj";
 
+/* --- images -------------------------------------------------------------
+   Logos and headshots come from ESPN's image CDN. Nothing here is load-bearing:
+   if a request fails (offline, 404, blocked), onerror swaps in the text the
+   board used to show, so the page never displays a broken image. */
+const TEAM_SLUG={ARI:"ari",ATL:"atl",BAL:"bal",BUF:"buf",CAR:"car",CHI:"chi",CIN:"cin",CLE:"cle",
+  DAL:"dal",DEN:"den",DET:"det",GB:"gb",HOU:"hou",IND:"ind",JAX:"jax",JAC:"jax",KC:"kc",
+  LA:"lar",LAR:"lar",LAC:"lac",LV:"lv",OAK:"lv",SD:"lac",STL:"lar",MIA:"mia",MIN:"min",
+  NE:"ne",NO:"no",NYG:"nyg",NYJ:"nyj",PHI:"phi",PIT:"pit",SEA:"sea",SF:"sf",TB:"tb",
+  TEN:"ten",WAS:"wsh",WSH:"wsh"};
+function teamLogo(t){const s=TEAM_SLUG[String(t||"").toUpperCase().trim()];
+  return s?`https://a.espncdn.com/i/teamlogos/nfl/500/${s}.png`:null;}
+function teamCell(t){
+  t=t||"";const u=teamLogo(t);
+  if(!u)return `<span class="tm">${t}</span>`;
+  return `<span class="tmwrap" title="${t}"><img class="tmlogo" src="${u}" alt="" loading="lazy"`+
+    ` onerror="this.parentNode.classList.add('nologo')"><span class="tm">${t}</span></span>`;}
+function initials(n){return String(n||"").split(/\s+/).filter(Boolean).map(w=>w[0]).join("").slice(0,2).toUpperCase();}
+function shot(q){
+  const lg=teamLogo(q.team);
+  const badge=lg?`<img class="shotteam" src="${lg}" alt="" loading="lazy" onerror="this.remove()">`:"";
+  const img=q.headshot?`<img class="shotimg" src="${q.headshot}" alt="" loading="lazy"`+
+    ` onerror="this.closest('.shot').classList.add('noshot')">`:"";
+  return `<div class="shot${q.headshot?"":" noshot"}">${img}`+
+    `<span class="shotini">${initials(q.name)}</span>${badge}</div>`;}
+
 function detail(q,maxAbs){
   const pts0=Math.max(0,A+B*50), s=sumW();
   const contribs=GROUPS.map(g=>({g,c:B*((weights[g]||0)/s)*((q.indices[g]??50)-50),idx:q.indices[g]??50}));
@@ -452,8 +504,8 @@ function detail(q,maxAbs){
       <div class="wtk"><div class="wmid"></div><div class="wb" style="${st}"></div></div>
       <div class="v" style="color:${col}">${x.c>=0?"+":""}${fmt(x.c)}</div>`;}).join("");
   const feats=Object.entries(q.signals||{}).map(([k,v])=>`<tr><td class="k">${k}</td><td class="v">${fmt(v,2)}</td></tr>`).join("");
-  return `<div class="dhead"><div><h3>${q.name} — ${q.archetype||""}</h3>
-      <div style="font-size:12.5px;color:var(--muted)">index 50 = league-average QB · bars are points added vs. average at the current weights</div></div>
+  return `<div class="dhead"><div class="who">${shot(q)}<div><h3>${q.name} — ${q.archetype||""}</h3>
+      <div style="font-size:12.5px;color:var(--muted)">index 50 = league-average QB · bars are points added vs. average at the current weights</div></div></div>
     <div style="text-align:right"><div class="big">${fmt(q._p)}<span style="font-size:13px;color:var(--muted);font-weight:400"> pts/gm</span></div>
       <div style="font-size:12px;color:var(--muted)">avg QB ≈ ${fmt(pts0)}</div></div></div>
     ${overlays(q)}
@@ -477,7 +529,7 @@ function refresh(){
     x._vor=vor;
     return `<tr class="row" data-id="${x.rank}">
       <td class="rank num">${rank}</td>
-      <td class="qb"><b>${x.name}</b><span class="tm">${x.team||""}</span>
+      <td class="qb"><b>${x.name}</b>${teamCell(x.team)}
         <span class="archtag">${x.archetype||""}</span>${x.mover?'<span class="move">NEW</span>':''}${valueTag(x)}</td>
       <td class="num"><span class="bartrack"><span class="bar" style="width:${w}px"></span></span>${fmt(x._p)}</td>
       ${PLATS.map(p=>`<td class="num">${pfRank(x,p)}</td>`).join("")}

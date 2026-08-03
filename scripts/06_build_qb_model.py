@@ -44,7 +44,7 @@ for _pc in sorted(_ROOT.rglob("__pycache__"), key=lambda p: -len(p.parts)):
 import pandas as pd  # noqa: E402
 
 from src import (  # noqa: E402
-    adp as adp_mod, config, current_roster, data, qb_blend, ratings, report,
+    adp as adp_mod, config, current_roster, data, media, qb_blend, ratings, report,
     team_features,
 )
 
@@ -122,6 +122,19 @@ def main() -> None:
     if adp_df.empty:
         print("  [note] No data/adp.csv found — floor/ceiling shown, ADP & risk skipped.")
     result = ratings.attach(result, weekly, config.SCORING, adp_df, config)
+
+    # ---- headshots (cosmetic only) -----------------------------------------
+    # Wrapped: a picture is never worth failing a build over. If this errors or
+    # finds nothing, the board just shows initials avatars instead.
+    try:
+        n_shots = media.attach_headshots(result["payload"], players, rosters)
+        if n_shots:
+            print(f"  headshots matched for {n_shots}/{len(result['payload'])} QBs")
+        else:
+            print("  [note] No headshot URLs found in the nflverse tables — "
+                  "the board will show initials instead.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [note] Headshots skipped ({type(exc).__name__}: {exc}).")
 
     bt = result.get("backtest", {})
     if bt:
