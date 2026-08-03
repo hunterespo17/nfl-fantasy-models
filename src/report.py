@@ -219,7 +219,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .wmid{position:absolute;top:0;bottom:0;left:50%;width:1px;background:var(--baseline)}
   .wb{position:absolute;top:3px;height:12px;border-radius:3px}
   .wf .v{font-size:12.5px;font-variant-numeric:tabular-nums}
-  .feat{margin-top:16px}.feat table{font-size:13px}.feat td{padding:5px 10px;border-bottom:1px solid var(--border)}
+  .feat table{font-size:13px}.feat td{padding:5px 10px;border-bottom:1px solid var(--border)}
   .feat .k{color:var(--ink-2)}.feat .v{text-align:right;font-variant-numeric:tabular-nums}
   /* the ADP table inside a player's panel: one column per site, Market last and
      bold. These rules sit after ".detail td" on purpose — same specificity, so
@@ -255,6 +255,30 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .simcard .cost.earlier{color:var(--neg)}
   .simcard .cost.same{color:var(--muted)}
   .simdots{color:var(--accent);letter-spacing:1px;margin-left:6px;font-size:10px}
+  /* The panel is two columns: what you read top-to-bottom on the left, the comps
+     as a rail down the right, so a replacement is always one glance from the
+     price. Under 900px the rail drops underneath instead of sitting off the side
+     of the horizontally-scrolling table where you'd never find it. */
+  .dcols{display:grid;grid-template-columns:minmax(0,1fr) minmax(238px,290px);gap:4px 28px;align-items:start}
+  .dmain,.drail{min-width:0}
+  .drail .sim{margin:0}
+  .drail .simgrid{grid-template-columns:1fr}
+  .drail .simcap{max-width:none}
+  @media(max-width:900px){.dcols{grid-template-columns:1fr}.drail{margin-top:18px}}
+  /* Collapsible breakdown. Both sections start closed so a panel opens on the
+     things you act on — the price and the comps — and the toggle is shared across
+     players: open it once and it stays open for the rest of the session. */
+  .fold{border-top:1px solid var(--border);margin-top:14px}
+  .fold>summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:8px;
+    padding:11px 8px 9px;margin:0 -8px;border-radius:8px;font-size:12px;font-weight:700;
+    color:var(--accent);text-transform:uppercase;letter-spacing:.06em;user-select:none}
+  .fold>summary::-webkit-details-marker{display:none}
+  .fold>summary::before{content:"▸";font-size:10px;color:var(--muted);display:inline-block;
+    transition:transform .15s;text-transform:none}
+  .fold[open]>summary::before{transform:rotate(90deg)}
+  .fold>summary:hover{background:var(--accent-soft)}
+  .fold .fsub{font-weight:400;font-size:12px;color:var(--muted);text-transform:none;letter-spacing:0}
+  .fbody{padding:3px 0 14px}
   .note{color:var(--muted);font-size:12.5px;margin-top:14px}
   .pill{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;margin-left:8px;background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.28);letter-spacing:.02em;vertical-align:middle}
   @media(max-width:640px){.wname{width:auto}}
@@ -747,11 +771,25 @@ function similarQBs(q){
       <span class="mt">${c.x.archetype||"—"} · ${fmt(c.x._p)} pts/gm${meter}</span>
       <span class="cost ${cls}">${cost}</span></button>`;
   }).join("");
-  return `<div class="sim"><h3>Similar QBs — if he's gone or too pricey</h3>
-    <div class="simcap">Closest on style, factor mix and projected output at your current weights.
-      Anyone you can <b>still get</b> on ${where} is listed first, with how many QB spots later he
-      goes. Move the sliders and this re-sorts.</div>
+  /* The caption earns its keep but the rail is narrow, so it's kept to two lines:
+     what the list is for, and the one thing that isn't obvious from the cards
+     (whoever you can still get is listed first). */
+  return `<div class="sim"><h3>Similar QBs</h3>
+    <div class="simcap">If he's gone or too pricey. Closest on style, factor mix and output
+      at your weights — anyone you can <b>still get</b> on ${where} comes first.</div>
     <div class="simgrid">${cards}</div></div>`;
+}
+
+/* One shared open/closed state for the collapsible sections. It lives out here
+   rather than in the DOM because the whole table body is re-rendered on every
+   slider move, which would otherwise snap them shut mid-drag. Sharing it (rather
+   than keeping a flag per player) is what makes the choice stick: open "Why this
+   projection" on one QB and it's open on the next one you click. */
+const folds={why:false,inputs:false};
+function fold(k,title,sub,body){
+  return `<details class="fold" data-fold="${k}"${folds[k]?" open":""}>
+      <summary>${title}<span class="fsub">${sub}</span></summary>
+      <div class="fbody">${body}</div></details>`;
 }
 
 function detail(q,maxAbs){
@@ -769,13 +807,17 @@ function detail(q,maxAbs){
       <div style="font-size:12.5px;color:var(--muted)">index 50 = league-average QB · bars are points added vs. average at the current weights</div></div></div>
     <div style="text-align:right"><div class="big">${fmt(q._p)}<span style="font-size:13px;color:var(--muted);font-weight:400"> pts/gm</span></div>
       <div style="font-size:12px;color:var(--muted)">avg QB ≈ ${fmt(pts0)}</div></div></div>
-    ${overlays(q)}
-    ${similarQBs(q)}
-    <div class="legend"><span><span class="sw" style="background:var(--pos)"></span>boosts</span>
-      <span><span class="sw" style="background:var(--neg)"></span>lowers</span>
-      <span style="color:var(--muted)">middle column = 0–100 factor index</span></div>
-    <div class="wf">${rows}</div>
-    ${feats?`<div class="feat"><h3>Underlying inputs</h3><table>${feats}</table></div>`:""}`;
+    <div class="dcols">
+      <div class="dmain">${overlays(q)}
+        ${fold("why","Why this projection",`${GROUPS.length} factors at your weights`,
+          `<div class="legend"><span><span class="sw" style="background:var(--pos)"></span>boosts</span>
+             <span><span class="sw" style="background:var(--neg)"></span>lowers</span>
+             <span style="color:var(--muted)">middle column = 0–100 factor index</span></div>
+           <div class="wf">${rows}</div>`)}
+        ${feats?fold("inputs","Underlying inputs","the raw numbers behind the factors",
+          `<div class="feat"><table>${feats}</table></div>`):""}</div>
+      <div class="drail">${similarQBs(q)}</div>
+    </div>`;
 }
 
 function refresh(){
@@ -786,10 +828,17 @@ function refresh(){
   rows.sort(sortCmp(sortMode));
   tiers(all);
   const maxP=Math.max(...DATA.qbs.map(x=>x._p),1);
+  // Which panels are open right now. The tbody is rebuilt from scratch on every
+  // slider move, so without carrying this across, a panel would slam shut the
+  // instant you touched a weight — exactly when you most want to watch the bars
+  // and the comps re-sort under it.
+  const wasOpen=new Set([...document.querySelectorAll("tr.detail")]
+    .filter(d=>d.style.display!=="none").map(d=>d.dataset.for));
   $("#tbody").innerHTML=rows.map((x)=>{
     const rank=all.indexOf(x)+1, vor=x._p-replPts, w=Math.max(2,Math.round(90*x._p/maxP));
+    const isOpen=wasOpen.has(String(x.rank));
     x._vor=vor;
-    return `<tr class="row" data-id="${x.rank}">
+    return `<tr class="row${isOpen?" open":""}" data-id="${x.rank}">
       <td class="rank num">${rank}</td>
       <td class="qb"><b>${x.name}</b>${teamCell(x.team)}
         <span class="archtag">${x.archetype||""}</span>${x.mover?'<span class="move">NEW</span>':''}${valueTag(x)}</td>
@@ -801,7 +850,7 @@ function refresh(){
       <td>${bdg(x.risk_bucket,RCLS[x.risk_bucket])}</td>
       <td class="whycol">${flagChips(x)}</td>
       <td class="num"><span class="caret">▸</span></td></tr>
-      <tr class="detail" data-for="${x.rank}" style="display:none"><td colspan="${NCOL}"><div class="dbox">${detail(x)}</div></td></tr>`;
+      <tr class="detail" data-for="${x.rank}" style="display:${isOpen?"table-row":"none"}"><td colspan="${NCOL}"><div class="dbox">${detail(x)}</div></td></tr>`;
   }).join("");
   document.querySelectorAll("tr.row").forEach(tr=>tr.onclick=()=>{
     const d=document.querySelector(`tr.detail[data-for="${tr.dataset.id}"]`);
@@ -819,6 +868,15 @@ function refresh(){
     if(d && d.style.display==="none"){d.style.display="table-row";tr.classList.add("open");}
     tr.scrollIntoView({behavior:"smooth",block:"center"});
   });
+  // The two breakdown sections share one open/closed state, so flipping one
+  // applies it to every other panel as well and the choice carries to the next
+  // player you click. Assigning .open when it already matches fires no event,
+  // so this settles in one pass instead of ping-ponging between panels.
+  document.querySelectorAll("details.fold").forEach(d=>d.addEventListener("toggle",()=>{
+    const k=d.dataset.fold; if(folds[k]===d.open)return;
+    folds[k]=d.open;
+    document.querySelectorAll(`details.fold[data-fold="${k}"]`).forEach(o=>{o.open=d.open;});
+  }));
   weightBars(); syncSliderLabels();
 }
 
