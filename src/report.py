@@ -209,6 +209,12 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .shot.noshot .shotimg{display:none}
   .shot.noshot .shotini{display:block}
   .shotteam{position:absolute;right:-5px;bottom:-3px;width:27px;height:27px;object-fit:contain;background:var(--surface-1);border-radius:50%;padding:2px;box-shadow:0 1px 4px rgba(0,0,0,.28)}
+  /* Same avatar shrunk for the comp cards. 38px is the largest circle that still
+     fits inside the three lines of text the card already had, so adding faces
+     costs no height and all five comps stay on screen at once. */
+  .shot.xs{width:38px;height:38px}
+  .shot.xs .shotini{font-size:13px}
+  .shot.xs .shotteam{right:-3px;bottom:-2px;width:17px;height:17px;padding:1px;box-shadow:0 1px 3px rgba(0,0,0,.25)}
   .dhead .big{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}
   .legend{font-size:12px;color:var(--ink-2);display:flex;gap:14px;margin-bottom:8px}
   .sw{display:inline-block;width:10px;height:10px;border-radius:3px;vertical-align:middle;margin-right:5px}
@@ -243,10 +249,16 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .sim{margin:18px 0 2px}
   .simcap{font-size:12.5px;color:var(--muted);margin:-2px 0 9px;max-width:640px;line-height:1.45}
   .simgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(224px,1fr));gap:8px}
-  .simcard{display:block;text-align:left;font:inherit;cursor:pointer;width:100%;
+  /* Face on the left, the three lines of text on the right. min-width:0 on the
+     text column is what lets a long name wrap instead of shoving the card wider
+     than the rail. */
+  .simcard{display:flex;align-items:center;gap:11px;text-align:left;font:inherit;cursor:pointer;width:100%;
     background:var(--surface-1);border:1px solid var(--border);border-radius:11px;padding:9px 12px 10px;
     transition:background .12s,border-color .12s}
   .simcard:hover{background:var(--accent-soft);border-color:var(--accent)}
+  .simcard .shot{background:var(--plane)}
+  .simcard:hover .shot{border-color:var(--accent)}
+  .siminfo{min-width:0;flex:1 1 auto}
   .simcard .nm{display:block;font-size:13.5px;font-weight:700;color:var(--ink)}
   .simcard .nm .tm{color:var(--muted);font-size:12px;font-weight:600;margin-left:5px}
   .simcard .mt{display:block;font-size:11.5px;color:var(--ink-2);margin-top:1px;font-variant-numeric:tabular-nums}
@@ -292,14 +304,16 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div class="spacer"></div>
     <button class="toggle" id="themeBtn" type="button">◑ Theme</button>
   </div>
+  <!-- Rankings first and open by default: the board is what you came for on
+       draft day. "How it works" is reference material you read once. -->
   <div class="hgrid"><div class="tabs" role="tablist">
-    <button class="tab" role="tab" data-tab="overview" aria-selected="true">How it works</button>
-    <button class="tab" role="tab" data-tab="rankings" aria-selected="false">QB Rankings</button>
+    <button class="tab" role="tab" data-tab="rankings" aria-selected="true">QB Rankings</button>
+    <button class="tab" role="tab" data-tab="overview" aria-selected="false">How it works</button>
   </div></div>
 </header>
 
 <div class="wrap">
-  <section id="overview" class="active">
+  <section id="overview">
     <div class="card">
       <h2>What this model does</h2>
       <p>It projects each quarterback's <strong>fantasy points</strong> as a transparent blend of factors —
@@ -376,7 +390,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </section>
 
-  <section id="rankings">
+  <section id="rankings" class="active">
     <div class="card">
       <h2>Tune the weights</h2>
       <p style="margin-bottom:14px">Drag any factor and the projections and ranking update instantly. This is the
@@ -698,13 +712,18 @@ function teamCell(t){
   return `<span class="tmwrap" title="${t}"><img class="tmlogo" src="${u}" alt="" loading="lazy"`+
     ` onerror="this.parentNode.classList.add('nologo')"><span class="tm">${t}</span></span>`;}
 function initials(n){return String(n||"").split(/\s+/).filter(Boolean).map(w=>w[0]).join("").slice(0,2).toUpperCase();}
-function shot(q){
+/* Headshot with the team logo badged on its corner, initials when there's no
+   photo. `sz` picks a size variant ("xs" for the comp cards). It emits a <span>
+   rather than a <div> because one of its callers is a <button>, which may only
+   contain phrasing content — .shot sets display:grid either way, so nothing
+   about the rendering changes. */
+function shot(q,sz){
   const lg=teamLogo(q.team);
   const badge=lg?`<img class="shotteam" src="${lg}" alt="" loading="lazy" onerror="this.remove()">`:"";
   const img=q.headshot?`<img class="shotimg" src="${q.headshot}" alt="" loading="lazy"`+
     ` onerror="this.closest('.shot').classList.add('noshot')">`:"";
-  return `<div class="shot${q.headshot?"":" noshot"}">${img}`+
-    `<span class="shotini">${initials(q.name)}</span>${badge}</div>`;}
+  return `<span class="shot${sz?" "+sz:""}${q.headshot?"":" noshot"}">${img}`+
+    `<span class="shotini">${initials(q.name)}</span>${badge}</span>`;}
 
 /* --- "Similar QBs": the backup-options layer ------------------------------
    If he's already gone, or the price is too high, who does roughly the same
@@ -767,9 +786,10 @@ function similarQBs(q){
       cost=`QB${c.cost} · same spot`; cls="same"; tip="drafted in the same range";
     }
     return `<button class="simcard" type="button" data-goto="${c.x.rank}" title="${tip}">
+      ${shot(c.x,"xs")}<span class="siminfo">
       <span class="nm">${c.x.name}<span class="tm">${c.x.team||""}</span></span>
       <span class="mt">${c.x.archetype||"—"} · ${fmt(c.x._p)} pts/gm${meter}</span>
-      <span class="cost ${cls}">${cost}</span></button>`;
+      <span class="cost ${cls}">${cost}</span></span></button>`;
   }).join("");
   /* The caption earns its keep but the rail is narrow, so it's kept to two lines:
      what the list is for, and the one thing that isn't obvious from the cards
@@ -820,6 +840,46 @@ function detail(q,maxAbs){
     </div>`;
 }
 
+const qbById=id=>DATA.qbs.find(x=>String(x.rank)===String(id));
+
+// A detail panel is built the first time it's opened, and then left alone until
+// the next refresh() throws the whole tbody away. dataset.built is what stops a
+// reopen from rebuilding one that's already sitting there.
+function fillPanel(d){
+  if(!d||d.dataset.built)return;
+  const q=qbById(d.dataset.for); if(!q)return;
+  d.querySelector(".dbox").innerHTML=detail(q);
+  d.dataset.built="1";
+  wirePanel(d);
+}
+function openPanel(tr,d){ if(!d)return; fillPanel(d); d.style.display="table-row"; tr.classList.add("open"); }
+
+// Click handlers for one freshly built panel. Scoped to that panel: its siblings
+// are either already wired or not built yet, so there's nothing to re-bind.
+function wirePanel(root){
+  // a "similar QB" card jumps to that player's row and opens him. If the search
+  // box is currently hiding him, clear it first so there's something to jump to.
+  root.querySelectorAll(".simcard").forEach(b=>b.onclick=ev=>{
+    ev.stopPropagation();
+    const id=b.dataset.goto, find=()=>document.querySelector(`tr.row[data-id="${id}"]`);
+    let tr=find();
+    if(!tr && $("#search").value){ $("#search").value=""; refresh(); tr=find(); }
+    if(!tr)return;
+    const d=document.querySelector(`tr.detail[data-for="${id}"]`);
+    if(d && d.style.display==="none") openPanel(tr,d);
+    tr.scrollIntoView({behavior:"smooth",block:"center"});
+  });
+  // The two breakdown sections share one open/closed state, so flipping one
+  // applies it to every other panel as well and the choice carries to the next
+  // player you click. Assigning .open when it already matches fires no event,
+  // so this settles in one pass instead of ping-ponging between panels.
+  root.querySelectorAll("details.fold").forEach(d=>d.addEventListener("toggle",()=>{
+    const k=d.dataset.fold; if(folds[k]===d.open)return;
+    folds[k]=d.open;
+    document.querySelectorAll(`details.fold[data-fold="${k}"]`).forEach(o=>{o.open=d.open;});
+  }));
+}
+
 function refresh(){
   const q=($("#search").value||"").trim().toLowerCase();
   const rows=DATA.qbs.map(x=>{x._p=projOf(x);return x;}).filter(x=>!q||x.name.toLowerCase().includes(q));
@@ -850,34 +910,22 @@ function refresh(){
       <td>${bdg(x.risk_bucket,RCLS[x.risk_bucket])}</td>
       <td class="whycol">${flagChips(x)}</td>
       <td class="num"><span class="caret">▸</span></td></tr>
-      <tr class="detail" data-for="${x.rank}" style="display:${isOpen?"table-row":"none"}"><td colspan="${NCOL}"><div class="dbox">${detail(x)}</div></td></tr>`;
+      <tr class="detail" data-for="${x.rank}" style="display:${isOpen?"table-row":"none"}"><td colspan="${NCOL}"><div class="dbox"></div></td></tr>`;
   }).join("");
   document.querySelectorAll("tr.row").forEach(tr=>tr.onclick=()=>{
     const d=document.querySelector(`tr.detail[data-for="${tr.dataset.id}"]`);
-    const open=d.style.display!=="none";d.style.display=open?"none":"table-row";tr.classList.toggle("open",!open);
+    if(d.style.display!=="none"){d.style.display="none";tr.classList.remove("open");}
+    else openPanel(tr,d);
   });
-  // a "similar QB" card jumps to that player's row and opens him. If the search
-  // box is currently hiding him, clear it first so there's something to jump to.
-  document.querySelectorAll(".simcard").forEach(b=>b.onclick=ev=>{
-    ev.stopPropagation();
-    const id=b.dataset.goto, find=()=>document.querySelector(`tr.row[data-id="${id}"]`);
-    let tr=find();
-    if(!tr && $("#search").value){ $("#search").value=""; refresh(); tr=find(); }
-    if(!tr)return;
-    const d=document.querySelector(`tr.detail[data-for="${id}"]`);
-    if(d && d.style.display==="none"){d.style.display="table-row";tr.classList.add("open");}
-    tr.scrollIntoView({behavior:"smooth",block:"center"});
-  });
-  // The two breakdown sections share one open/closed state, so flipping one
-  // applies it to every other panel as well and the choice carries to the next
-  // player you click. Assigning .open when it already matches fires no event,
-  // so this settles in one pass instead of ping-ponging between panels.
-  document.querySelectorAll("details.fold").forEach(d=>d.addEventListener("toggle",()=>{
-    const k=d.dataset.fold; if(folds[k]===d.open)return;
-    folds[k]=d.open;
-    document.querySelectorAll(`details.fold[data-fold="${k}"]`).forEach(o=>{o.open=d.open;});
-  }));
   weightBars(); syncSliderLabels();
+  // Only the panels you actually have open get built. Dragging a slider rebuilds
+  // this table on every tick, and a panel is by far the most expensive thing in
+  // it — nine factor bars, an ADP table, and five comp cards each carrying a
+  // headshot and a logo. Building all 32 to show one made the sliders stutter;
+  // building only what's on screen keeps a drag smooth however long the board.
+  // Left until last on purpose: if one panel ever failed to build, the board
+  // itself is already wired and usable rather than rendered-but-dead.
+  wasOpen.forEach(id=>fillPanel(document.querySelector(`tr.detail[data-for="${id}"]`)));
 }
 
 function header(){
