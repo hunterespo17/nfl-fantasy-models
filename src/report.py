@@ -624,7 +624,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
           The bars are lower than the quarterback board's on purpose — a 25-point game is a routine week for a starting
           QB and a genuinely big one for a back.</div>
         <div class="ovh">ADP</div><div>Where he's drafted on each platform, as an <b>RB rank</b> — <b>Sleeper</b>, <b>ESPN</b> &amp; <b>FFC</b> (redraft) and
-          <b>Underdog</b> (best-ball). The <b>Market</b> column is a neutral reference — the average of <b>Underdog</b> and <b>FFC</b>, spanning both formats.
+          <b>Underdog</b> (best-ball). A site only gets a column if it actually prices backs in your file, so this board may show fewer
+          than four. The <b>Market</b> column is a neutral reference: the sites blended and re-ranked — it prefers <b>Underdog</b> and
+          <b>FFC</b>, the two you don't draft on, and widens to the rest only when those two don't both price backs. When the platform
+          you're drafting on is itself part of that blend, it's taken back out before he's graded against it, so no site is ever
+          measured against a market containing itself.
           Set <b>&ldquo;Drafting on&rdquo;</b> to your platform and the <b style="color:var(--good)">▲Value</b> /
           <b style="color:var(--neg)">▼Reach</b> tag flags who your platform drafts <b>earlier or later than that Market</b>.
           Leave it on <b>Consensus</b> to compare the model to the market instead; open a row for the full gap.</div>
@@ -1043,9 +1047,10 @@ function mktWords(){return MKT_SRC.map(p=>PLABEL[p]||p).join(" and ")||"no site"
    FFC prices and nothing else draws one ADP column and not four, three of them
    full of dashes. */
 let PLATS=[];
-// "Market" = re-ranked average of Underdog (best-ball) + FFC (season-long) ranks.
-// A neutral reference spanning both draft formats. Sleeper/ESPN are the platforms you
-// draft on and check AGAINST this market; the market itself is built only from UD+FFC.
+// "Market" = re-ranked average of the neutral sites' ranks — Underdog (best-ball)
+// + FFC (season-long) wherever both price the position, since those are the two
+// you don't draft on. Which sites end up in it is decided per position, down in
+// resetBoard, because the file is not evenly filled across positions.
 let MKT_SRC=[];
 /* With only ONE market source the Market column is a re-rank of that one site --
    the same numbers twice, side by side, and a "vs market" row that can only ever
@@ -1056,19 +1061,41 @@ let SHOW_MKT=false;
 let NCOL=10;
 let draftPlatform="consensus";
 function computeMarket(){
-  DATA.qbs.forEach(x=>{x._mktScore=null;x._market=null;});
-  const scored=DATA.qbs.map(x=>{
-    const rs=MKT_SRC.map(p=>x.adp_platforms&&x.adp_platforms[p]).filter(v=>v!=null);
-    x._mktScore=rs.length?rs.reduce((a,b)=>a+b,0)/rs.length:null; return x;
-  }).filter(x=>x._mktScore!=null).sort((a,b)=>a._mktScore-b._mktScore);
-  scored.forEach((x,i)=>{x._market=i+1;});   // clean market pos# 1..N
+  DATA.qbs.forEach(x=>{x._mktScore=null;x._market=null;x._mktLOO={};});
+  const rankBy=(srcs,assign)=>{
+    if(!srcs.length)return;
+    DATA.qbs.map(x=>{
+      const rs=srcs.map(p=>x.adp_platforms&&x.adp_platforms[p]).filter(v=>v!=null);
+      return {x:x,s:rs.length?rs.reduce((a,b)=>a+b,0)/rs.length:null};
+    }).filter(o=>o.s!=null).sort((a,b)=>a.s-b.s)
+      .forEach((o,i)=>assign(o.x,i+1,o.s));
+  };
+  rankBy(MKT_SRC,(x,r,s)=>{x._market=r;x._mktScore=s;});   // clean market pos# 1..N
+  /* A site that helps BUILD the market can't be honestly graded against it — it
+     would be measured partly against itself and every gap would read smaller
+     than it really is. So each site inside the blend gets its own market with
+     that site left out. Sites outside the blend use the plain market. This only
+     bites when a position is priced by few enough sites that a platform you
+     actually draft on has to be one of them — which is exactly the case where
+     the flattery would go unnoticed. */
+  if(MKT_SRC.length>1)MKT_SRC.forEach(pf=>{
+    rankBy(MKT_SRC.filter(p=>p!==pf),(x,r)=>{x._mktLOO[pf]=r;});
+  });
 }
-/* How one site prices a QB against the Market column (Underdog + FFC).
+/* The market price to judge ONE site against: leave-one-out when that site is in
+   the blend, the plain market when it isn't. null means there is no market price
+   for him that doesn't already contain this site — said plainly rather than
+   papered over with the self-including number. */
+function mktFor(x,pf){
+  if(MKT_SRC.indexOf(pf)>=0)return (x._mktLOO&&x._mktLOO[pf]!=null)?x._mktLOO[pf]:null;
+  return x._market!=null?x._market:null;
+}
+/* How one site prices a player against the Market column.
    gap = market − site.  NEGATIVE: the site lets him fall LATER than the market,
    so he's cheaper there — a value. POSITIVE: the site drafts him EARLIER, so
-   you'd be paying up — a reach. Two QB spots is the cutoff either way. */
+   you'd be paying up — a reach. Two spots is the cutoff either way. */
 function mktEdge(x,pf){
-  const mine=(x.adp_platforms&&x.adp_platforms[pf])??null, mkt=x._market??null;
+  const mine=(x.adp_platforms&&x.adp_platforms[pf])??null, mkt=mktFor(x,pf);
   if(mine==null||mkt==null)return {mine,mkt,gap:null,cls:"",word:""};
   const gap=mkt-mine;
   return {mine,mkt,gap,
@@ -1083,12 +1110,12 @@ function pfRank(x,pf){
   return `<span class="pfr ${e.cls}${sel}"${e.word?` title="${PLABEL[pf]||pf}: ${e.word}"`:""}>${POS}${e.mine}</span>`;
 }
 // Value/Reach is mode-aware: "consensus" = model vs the whole market; a platform =
-// that platform's price vs the MARKET column (Underdog + FFC blend). A player is a
-// reach on a platform when that platform drafts him EARLIER than the market, a value
-// when it lets him fall LATER — i.e. that platform is out of step with the market.
+// that platform's price vs the market, with that platform left out of the market.
+// A player is a reach on a platform when that platform drafts him EARLIER than the
+// market, a value when it lets him fall LATER — i.e. that platform is out of step.
 function platEdge(x){
   if(draftPlatform==="consensus")return {tag:x.value_tag,gap:x.value_gap,mode:"c"};
-  const mine=x.adp_platforms&&x.adp_platforms[draftPlatform], mkt=x._market;
+  const mine=x.adp_platforms&&x.adp_platforms[draftPlatform], mkt=mktFor(x,draftPlatform);
   if(mine==null)return {tag:null,mine:null,mkt:mkt==null?null:mkt,mode:"p"};
   if(mkt==null)return {tag:null,mine,mkt:null,mode:"p"};
   const gap=mkt-mine;   // + => platform drafts him earlier than the market => reach
@@ -1096,7 +1123,7 @@ function platEdge(x){
 }
 function valueTag(x){const e=platEdge(x);if(!e||!e.tag)return '';
   return e.tag==="Value"?' <span class="vt g">▲ VALUE</span>':' <span class="vt r">▼ REACH</span>';}
-// detail-panel line: how the selected platform prices him vs the market (UD+FFC blend)
+// detail-panel line: how the selected platform prices him vs the market it isn't in
 function platEdgeLine(o){
   if(draftPlatform==="consensus")return "";
   const lab=PLABEL[draftPlatform]||draftPlatform, e=platEdge(o);
@@ -1106,7 +1133,8 @@ function platEdgeLine(o){
   if(e.gap>=2)verdict=`<span style="color:var(--neg)">▼ ${fmt(Math.abs(e.gap),0)} spots earlier than the market — reach on ${lab}</span>`;
   else if(e.gap<=-2)verdict=`<span style="color:var(--good)">▲ ${fmt(Math.abs(e.gap),0)} spots later than the market — value on ${lab}</span>`;
   else verdict=`<span style="color:var(--muted)">in line with the market</span>`;
-  return `<div class="ovh">On ${lab}</div><div><b>${POS}${e.mine}</b> here vs market <b>${POS}${e.mkt}</b> <span style="color:var(--muted)">(Underdog + FFC)</span> — ${verdict}</div>`;
+  const src=MKT_SRC.filter(p=>p!==draftPlatform).map(p=>PLABEL[p]||p).join(" + ")||"no other site";
+  return `<div class="ovh">On ${lab}</div><div><b>${POS}${e.mine}</b> here vs market <b>${POS}${e.mkt}</b> <span style="color:var(--muted)">(${src})</span> — ${verdict}</div>`;
 }
 const FLAGCLS={up:"g",down:"r",warn:"a"};
 /* --- Value in POINTS, not in draft slots --------------------------------
@@ -1255,8 +1283,11 @@ function adpTable(o){
     :"";
 
   const cap=SHOW_MKT
-    ? `Market blends ${mktWords()} — one neutral price spanning best-ball and season-long.
-       <b style="color:var(--good)">Green</b> means that site lets him fall <b>later</b> than the
+    ? `Market blends ${mktWords()}, re-ranked — one reference price instead of four opinions.
+       ${MKT_SRC.indexOf(draftPlatform)>=0
+         ? `Your platform is part of that blend, so it's taken back out before the comparison —
+            otherwise it would be graded against itself and every gap would read too small. `
+         : ""}<b style="color:var(--good)">Green</b> means that site lets him fall <b>later</b> than the
        market, so he's cheaper there; <b style="color:var(--neg)">red</b> means it drafts him
        <b>earlier</b> and you'd be paying up.`
     : MKT_SRC.length
@@ -1652,7 +1683,14 @@ function loadBoard(pos){
   // rather than written down: 8 fixed columns, one per site, plus Market if it's
   // being drawn. It's the colspan the detail row opens across.
   PLATS=(DATA.qbs.length&&DATA.qbs[0].adp_platforms)?Object.keys(DATA.qbs[0].adp_platforms):[];
+  /* Preferred market = Underdog (best-ball) + FFC (season-long): two sites you
+     don't draft on, spanning both formats. When a position isn't priced by both
+     of them, fall back to blending every site that DOES price it rather than
+     collapsing to a single site and losing the Market column — a two-site
+     average is still a market, and the leave-one-out above keeps it honest even
+     when one of those sites is the one you're drafting on. */
   MKT_SRC=["underdog","ffc"].filter(p=>PLATS.includes(p));
+  if(MKT_SRC.length<2)MKT_SRC=PLATS.slice();   // same order as the columns
   SHOW_MKT=MKT_SRC.length>1;
   NCOL=8+PLATS.length+(SHOW_MKT?1:0);
   PF=PLATS.map(p=>[p,PLABEL[p]||p]);

@@ -12,13 +12,22 @@ echo.
 where py >nul 2>nul
 if errorlevel 1 goto nopython
 
-echo [1 of 2]  Quarterbacks...
+rem Draft prices first. If the sites are down or the internet is flaky this
+rem step fails and we carry on with the prices already saved -- a bad network
+rem day should never cost you the board.
+echo [1 of 3]  Draft prices...
+echo.
+py scripts\15_pull_adp.py
+if errorlevel 1 echo   (Couldn't refresh prices. Using the ones already saved.)
+
+echo.
+echo [2 of 3]  Quarterbacks...
 echo.
 py scripts\06_build_qb_model.py
 if errorlevel 1 goto oops
 
 echo.
-echo [2 of 2]  Running backs...
+echo [3 of 3]  Running backs...
 echo.
 py scripts\11_build_rb_model.py
 if errorlevel 1 goto oops
