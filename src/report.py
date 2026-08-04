@@ -1,5 +1,5 @@
 """
-HTML report for the QB index-blend model.
+HTML report for the index-blend models. One template, any position.
 
 `render(result, meta)` returns one self-contained HTML string (CSS + JS inlined,
 no storage). It makes three kinds of network request, all optional: team logos
@@ -10,19 +10,49 @@ script below). With no internet, all three fail quietly and the board renders
 exactly as it did before any of them existed. The page has two tabs:
 
   How it works  -- explains the model and shows the factor weighting (% of 100).
-  QB Rankings   -- the board, with LIVE weight sliders: drag a factor's weight
+  Rankings      -- the board, with LIVE weight sliders: drag a factor's weight
                    and the projections + ranking recompute in the browser.
 
-All the math is embedded per QB as 0-100 factor indices plus a calibration
+All the math is embedded per player as 0-100 factor indices plus a calibration
 (a, b); the browser computes  pts = a + b * (sum(w*index)/sum(w))  on the fly.
+
+POSITION
+--------
+`meta["pos"]` drives everything position-specific and defaults to "QB", so a
+caller that never heard of this argument gets exactly the old quarterback page.
+Three mechanisms, in order of how much they can break:
+
+  1. __POS__ / __POS_LONG__ / __POS_LOWER__ / __POS_PLURAL__ tokens, swapped in
+     the HTML text below before the data is injected. Static labels only.
+  2. A `POS` constant in the script, used to build "RB12"-style rank strings at
+     runtime. Every one of those used to be a hard-coded "QB" + number.
+  3. `hidden` toggles for whole blocks that only make sense for one position --
+     the archetype chips, and Heath's two-path league-winner screen, which is a
+     claim about quarterbacks and is left off every other board on purpose.
+
+The payload key is still "qbs" for every position. It is the wrong name now, but
+it is load-bearing in about forty places in the script and renaming it would buy
+nothing a reader of this comment doesn't already know.
 """
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
 
+# Position words for the static labels. Anything not listed falls back to the
+# bare abbreviation, which reads fine everywhere it's used ("Search a K...").
+_POS_WORDS = {
+    "QB": ("Quarterback", "quarterback", "quarterbacks"),
+    "RB": ("Running back", "running back", "running backs"),
+    "WR": ("Wide receiver", "wide receiver", "wide receivers"),
+    "TE": ("Tight end", "tight end", "tight ends"),
+}
+
 
 def render(result: dict, meta: dict) -> str:
+    pos = str(meta.get("pos") or "QB").upper().strip() or "QB"
+    long, lower, plural = _POS_WORDS.get(pos, (pos, pos, pos + "s"))
+
     payload = {
         "meta": meta,
         # When this file was generated, in UTC. The page prints it in the
@@ -37,7 +67,16 @@ def render(result: dict, meta: dict) -> str:
         # show what the bars are instead of asking you to trust them.
         "ratings_meta": result.get("ratings_meta", {}),
     }
-    return _TEMPLATE.replace("__DATA_JSON__", json.dumps(payload))
+    html = (_TEMPLATE
+            .replace("__POS_LONG__", long)
+            .replace("__POS_LOWER__", lower)
+            .replace("__POS_PLURAL__", plural)
+            .replace("__POS__", pos))
+    # Data last: the JSON carries player names and free text, and swapping the
+    # label tokens after it is injected would let a stray token in the data get
+    # rewritten. Nothing in the payload should contain one -- this just makes it
+    # impossible rather than unlikely.
+    return html.replace("__DATA_JSON__", json.dumps(payload))
 
 
 _TEMPLATE = r"""<!DOCTYPE html>
@@ -53,7 +92,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate, max-age=0">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>NFL QB Projection Model</title>
+<title>NFL __POS__ Projection Model</title>
 <style>
   :root{
     --surface-1:#fcfcfb;--plane:#f5f6f9;--ink:#0b0b0b;--ink-2:#52514e;--muted:#898781;
@@ -113,6 +152,12 @@ _TEMPLATE = r"""<!DOCTYPE html>
     padding-left:15px;font-size:13px}
     .fresh,.fresh.show{transform:none}}
   section{display:none;padding-top:24px}section.active{display:block}
+  /* The position toggle sets .hidden on whole blocks, and several of them carry a
+     class with an explicit display (.ov is a grid). An author rule beats the
+     browser's own [hidden]{display:none}, so without !important those blocks stay
+     visible and an RB board would show the quarterback explainer underneath the
+     running-back one. */
+  [hidden]{display:none !important}
   .card{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);padding:22px 24px;margin:0 0 18px;box-shadow:var(--shadow)}
   h2{font-size:18px;font-weight:750;margin:0 0 12px;letter-spacing:-.015em}
   h3{font-size:12px;font-weight:700;margin:0 0 8px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
@@ -340,15 +385,20 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <body>
 <header>
   <div class="hgrid">
-    <div><h1>NFL QB Projection Model <span class="pill" id="seasonPill"></span></h1>
+    <div><h1>NFL __POS__ Projection Model <span class="pill" id="seasonPill"></span></h1>
       <div class="sub" id="subline"></div></div>
     <div class="spacer"></div>
+    <!-- Link to the other position's board. Hidden unless meta.sibling is set,
+         which only the deploy workflow does -- a locally-built board sits in
+         outputs\ under a different filename than the published site uses, so a
+         link rendered there would always 404. Better no link than a dead one. -->
+    <a class="toggle" id="siblingLink" href="#" hidden></a>
     <button class="toggle" id="themeBtn" type="button">◑ Theme</button>
   </div>
   <!-- Rankings first and open by default: the board is what you came for on
        draft day. "How it works" is reference material you read once. -->
   <div class="hgrid"><div class="tabs" role="tablist">
-    <button class="tab" role="tab" data-tab="rankings" aria-selected="true">QB Rankings</button>
+    <button class="tab" role="tab" data-tab="rankings" aria-selected="true">__POS__ Rankings</button>
     <button class="tab" role="tab" data-tab="overview" aria-selected="false">How it works</button>
   </div></div>
 </header>
@@ -357,22 +407,35 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <section id="overview">
     <div class="card">
       <h2>What this model does</h2>
-      <p>It projects each quarterback's <strong>fantasy points</strong> as a transparent blend of factors —
+      <p data-pos="QB">It projects each quarterback's <strong>fantasy points</strong> as a transparent blend of factors —
       <strong>who the player is</strong> and <strong>the situation he's in</strong>. Every factor is scored
       0–100 (his percentile among QBs), then combined with the weights below. Nothing is a black box: you can
       see exactly how much each factor counts, and change it on the <strong>QB Rankings</strong> tab.</p>
+      <p data-pos="RB">It projects each running back's <strong>fantasy points per game</strong> as a transparent blend of
+      factors — <strong>who the player is</strong> and <strong>the backfield he's in</strong>. Every factor is scored
+      0–100 (his percentile among the backs on this board), then combined with the weights below. Nothing is a black
+      box: you can see exactly how much each factor counts, and change it on the <strong>RB Rankings</strong> tab.
+      The scoring setting it's using is printed under the title at the top of the page.</p>
       <div id="btstat"></div>
     </div>
     <div class="card">
       <h2>Factor weighting</h2>
-      <p>What share of the projection each factor drives, out of 100%. Talent and archetype anchor the board.
+      <p data-pos="QB">What share of the projection each factor drives, out of 100%. Talent and archetype anchor the board.
       Talent is built from each QB's <strong>last three healthy seasons</strong> (12+ games, never reaching back
       more than five years) with <strong>touchdown luck regressed out</strong>, and thin résumés are pulled toward
       the field — so a sustained elite isn't sunk by one injury year, and a small hot sample can't crown someone.
       There is deliberately <strong>no "recent form" factor</strong>.</p>
+      <p data-pos="RB">What share of the projection each factor drives, out of 100%. <strong>Talent and volume</strong> anchor
+      the board. Talent is built from each back's recent seasons with <strong>touchdown luck regressed out</strong> —
+      short-yardage scores are the noisiest thing a running back does, and a back who found the end zone eleven times
+      once is not eleven-touchdown good. Thin résumés are pulled toward the field, so a 40-carry rookie can't leapfrog
+      the board on one good month.</p>
+      <p data-pos="RB"><strong>Receiving is weighted heavily on purpose.</strong> A target is worth far more than a carry
+      in any points-per-catch format, so backs who stay on the field for third down have a weekly floor the pure runners
+      never get. That, plus <strong>backfield share</strong>, is most of what separates a useful back from a handcuff.</p>
       <div id="weightBars"></div>
     </div>
-    <div class="card">
+    <div class="card" data-pos="QB">
       <h2>Archetypes</h2>
       <p>Each QB is bucketed by his rushing and passing value — touchdowns regressed toward what his yardage
       predicts — measured against the <strong>last five seasons</strong> of QB play. Style predicts fantasy value.
@@ -389,9 +452,40 @@ _TEMPLATE = r"""<!DOCTYPE html>
     </div>
     <div class="card">
       <h2>Draft overlays — floor, ceiling, ADP &amp; risk</h2>
-      <p>Beyond the projection, each QB gets four quick read-outs. These <strong>don't change the projection</strong> —
+      <p data-pos="QB">Beyond the projection, each QB gets four quick read-outs. These <strong>don't change the projection</strong> —
       they sit on top of it to help you draft:</p>
-      <div class="ov">
+      <p data-pos="RB">Beyond the projection, each back gets a few quick read-outs. These <strong>don't change the projection</strong> —
+      they sit on top of it to help you draft:</p>
+      <div class="ov" data-pos="RB">
+        <div class="ovh">Floor</div><div>His bad-week baseline — the recency-weighted 25th-percentile game he turns in.
+          Graded <b style="color:var(--good)">Safe</b> / <b style="color:#9a6600">Moderate</b> / <b style="color:var(--neg)">Risky</b> vs the field.
+          For a running back this is mostly a receiving question: the backs who catch passes still score on the days the
+          run game gets stuffed.</div>
+        <div class="ovh">Ceiling</div><div>How often he pops: share of games over <b>20</b> and <b>25</b> points
+          (recent games count more; thin samples pulled toward the field). <b>High</b> / <b>Medium</b> / <b>Low</b>.
+          The bars are lower than the quarterback board's on purpose — a 25-point game is a routine week for a starting
+          QB and a genuinely big one for a back.</div>
+        <div class="ovh">ADP</div><div>Where he's drafted on each platform, as an <b>RB rank</b> — <b>Sleeper</b>, <b>ESPN</b> &amp; <b>FFC</b> (redraft) and
+          <b>Underdog</b> (best-ball). The <b>Market</b> column is a neutral reference — the average of <b>Underdog</b> and <b>FFC</b>, spanning both formats.
+          Set <b>&ldquo;Drafting on&rdquo;</b> to your platform and the <b style="color:var(--good)">▲Value</b> /
+          <b style="color:var(--neg)">▼Reach</b> tag flags who your platform drafts <b>earlier or later than that Market</b>.
+          Leave it on <b>Consensus</b> to compare the model to the market instead; open a row for the full gap.</div>
+        <div class="ovh">Risk at ADP</div><div>Whether his price is worth it: paying an early pick for a shaky floor or thin
+          ceiling — or reaching past where the model ranks him — is risky. A late back is low-risk by definition, because
+          you haven't spent anything to find out.</div>
+        <div class="ovh">Worth the pick?</div><div>The same value question answered in <b>points</b> instead of draft slots. Past
+          draft prices were joined to what backs at those prices really averaged, giving a curve of <em>what a pick is worth</em>;
+          this is his projection minus that. <b style="color:var(--good)">+5</b> a game is the bar Heath's league-winning backs
+          cleared and <b style="color:var(--good)">+2</b> is ordinary good value. Those two bars were measured in <b>full PPR</b> —
+          in half-PPR they're a shade generous, so treat them as round numbers rather than a line in the sand.
+          It moves live with the weight sliders.</div>
+        <div class="ovh">No league-winner screen yet</div><div>The quarterback board carries Heath's two-path screen. The
+          running-back version of that research — first four years in the league, contract status, and how much of the
+          offense's expected points a back earns through the air — needs data this build doesn't load yet, so
+          <b>this board deliberately shows no gate at all</b> rather than grading backs against bars that were written
+          about quarterbacks.</div>
+      </div>
+      <div class="ov" data-pos="QB">
         <div class="ovh">Floor</div><div>His bad-week baseline — the recency-weighted 25th-percentile game he turns in.
           Graded <b style="color:var(--good)">Safe</b> / <b style="color:#9a6600">Moderate</b> / <b style="color:var(--neg)">Risky</b> vs the field.</div>
         <div class="ovh">Ceiling</div><div>How often he pops: share of games over <b>25</b> and <b>30</b> points
@@ -418,10 +512,31 @@ _TEMPLATE = r"""<!DOCTYPE html>
     </div>
     <div class="card">
       <h2>Using this as a draft cheat sheet</h2>
-      <p>A leak-free 4-year backtest is blunt about one thing: <strong>ADP already out-ranks this model</strong> — the market
+      <p data-pos="QB">A leak-free 4-year backtest is blunt about one thing: <strong>ADP already out-ranks this model</strong> — the market
       prices in everything the model sees plus offseason news, so don't draft <em>against</em> consensus on the model's say-so
       alone. Use the board like this instead:</p>
-      <div class="ov">
+      <p data-pos="RB">The same rule holds here as on the quarterback board: <strong>the market is smart</strong>. It prices in
+      everything the model sees plus training-camp news, so don't draft <em>against</em> consensus on the model's say-so alone.
+      Use the board like this instead:</p>
+      <div class="ov" data-pos="RB">
+        <div class="ovh">ADP is the backbone</div><div>Start from the <b>Market</b> column (Underdog + FFC blended) — that's the neutral
+          anchor. Set <b>&ldquo;Drafting on&rdquo;</b> to your platform to see who your platform prices as a value or reach <em>versus that market</em>.</div>
+        <div class="ovh">Role beats talent</div><div>The first thing to read on any back is <b>how much of the backfield he owns</b>.
+          A good player splitting carries three ways scores like a bench player; an ordinary one with the job to himself scores
+          like a starter. That's why <span class="fl g">Bellcow</span> and <span class="fl r">Committee</span> lead the chip row.</div>
+        <div class="ovh">Then receiving work</div><div><span class="fl g">79-target pace</span> is an absolute bar, not a percentile:
+          79 is what Heath's twenty best league-winning back seasons averaged in targets. <span class="fl r">No pass game role</span>
+          is the other end — a two-down back whose season dies the moment his team falls behind.</div>
+        <div class="ovh">Age is the hard one</div><div>The average league-winning back was <b>25</b>, and 85% of those seasons came from
+          players 27 or younger. <span class="fl g">Prime age</span> means 25 or under; a red <span class="fl r">Age 29</span> chip is
+          the model telling you the history is against him even when the projection isn't.</div>
+        <div class="ovh">Floor / Ceiling / Risk</div><div>The draft <em>context</em> a raw ADP number can't give you: how safe his
+          week-to-week floor is, how often he pops, and whether his price is worth it.</div>
+        <div class="ovh">What's missing</div><div>This build doesn't yet know about contract year, goal-line carries, or how explosive
+          a back's runs are. It also has <b>no rookie projections</b> — a back with no NFL games has nothing to measure. Both of
+          those are real gaps, not rounding errors, so don't read a missing rookie as a low ranking.</div>
+      </div>
+      <div class="ov" data-pos="QB">
         <div class="ovh">ADP is the backbone</div><div>Start from the <b>Market</b> column (Underdog + FFC blended) — that's the neutral anchor. Set <b>&ldquo;Drafting on&rdquo;</b> to your platform to see who your platform prices as a value or reach <em>versus that market</em>.</div>
         <div class="ovh">Floor / Ceiling / Risk</div><div>The draft <em>context</em> a raw ADP number can't give you: how safe his week-to-week floor is, how often he pops, and whether his price is worth it.</div>
         <div class="ovh">&ldquo;Why&rdquo; flags</div><div>The transparent reasons behind a profile:
@@ -440,11 +555,17 @@ _TEMPLATE = r"""<!DOCTYPE html>
     </div>
     <div class="card">
       <h2>Honest limitations</h2>
-      <p>NFL scoring is noisy — treat this as an <strong>edge, not gospel</strong>. Offensive-line quality and a
+      <p data-pos="QB">NFL scoring is noisy — treat this as an <strong>edge, not gospel</strong>. Offensive-line quality and a
       brand-new coordinator's exact tendencies aren't cleanly available in free data, so they're
       <strong>proxied</strong> (sack rate, measured team tendencies). Players who just changed teams are
       <strong>flagged</strong>, and their team-based factors are shrunk toward neutral because their new spot is
       uncertain. Rookies with no NFL history aren't projected yet.</p>
+      <p data-pos="RB">Running back is the noisiest position in fantasy football, and this is a <strong>first version</strong> —
+      treat it as an edge, not gospel. Three things to keep in mind. <strong>Backfield share is measured from last year</strong>,
+      so a rookie drafted in April or a free agent who just signed will look wrong until the season starts.
+      <strong>Offensive-line quality is proxied</strong>, not measured, because it isn't cleanly available in free data.
+      And a back who <strong>changed teams</strong> is flagged, with his team-based factors pulled toward neutral, because
+      nobody knows what his new role is yet. Rookies with no NFL games aren't projected at all.</p>
     </div>
   </section>
 
@@ -467,7 +588,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
             <option value="ceiling">Ceiling</option>
             <option value="risk">Risk</option>
           </select></label>
-        <label class="note" style="margin:0">League winners&nbsp;
+        <!-- Quarterbacks only. Every option below is Heath's two-path QB screen, and
+             on any other board `lw_gate` is null for every player, so the filter would
+             offer five settings that all return an empty result. -->
+        <label class="note" style="margin:0" data-pos="QB">League winners&nbsp;
           <select class="sortsel" id="lwsel" title="Heath's two-path screen, applied to the board. Nothing is hidden — non-matches are dimmed and sorted below.">
             <option value="all">All QBs</option>
             <option value="late">Late-round winners (after Rd 10)</option>
@@ -476,7 +600,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
             <option value="pc">— via McShanahan play-caller</option>
             <option value="miss">Misses both paths</option>
           </select></label>
-        <input class="search" id="search" type="search" placeholder="Search a QB…" aria-label="Search">
+        <input class="search" id="search" type="search" placeholder="Search a __POS__…" aria-label="Search">
         <span class="note" style="margin:0">Click a row for the full breakdown.</span>
       </div>
       <p class="note lwcount" id="lwcount" style="margin-top:10px"></p>
@@ -499,12 +623,31 @@ const DATA = __DATA_JSON__;
 const $=s=>document.querySelector(s);
 const fmt=(n,d=1)=>(n==null||isNaN(n))?"–":Number(n).toFixed(d);
 const GROUPS=DATA.groups.length?DATA.groups:Object.keys(DATA.weights);
-const A=DATA.calib.a, B=DATA.calib.b;
+const A=DATA.calib.a, B=DATA.calib.b, KN=(DATA.calib.knots||[]);
 let weights=Object.assign({}, DATA.weights);
+
+/* Which position this board is. Everywhere below that used to write a literal
+   "QB" in front of a rank number now writes POS, so an RB board says RB12 and
+   not QB12. Defaults to QB, so an older meta with no `pos` key renders exactly
+   the page it always did. */
+const POS=String((DATA.meta&&DATA.meta.pos)||"QB").toUpperCase();
+const POSLONG={QB:"Quarterback",RB:"Running back",WR:"Wide receiver",TE:"Tight end"}[POS]||POS;
+const POSPL={QB:"QBs",RB:"RBs",WR:"WRs",TE:"TEs"}[POS]||(POS+"s");
+
+/* Show the blocks written for this position and hide the rest. One pass over the
+   whole document, so a block added later only needs the attribute. */
+document.querySelectorAll("[data-pos]").forEach(el=>{el.hidden = el.dataset.pos!==POS;});
 
 $("#seasonPill").textContent=DATA.meta.season_label||"";
 $("#subline").textContent=DATA.meta.subline||"";
 $("#rnote").textContent=DATA.meta.note||"";
+
+/* Cross-board link. Only the published site sets meta.sibling; a board built on
+   your own machine has no companion file to point at, so the link stays hidden.
+   textContent, not innerHTML -- the label comes from meta and is never trusted. */
+(function(){const s=DATA.meta&&DATA.meta.sibling,a=$("#siblingLink");
+  if(!s||!s.href||!a)return;
+  a.setAttribute("href",s.href);a.textContent=s.label||"Other board";a.hidden=false;})();
 
 /* --- build stamp + freshness check ---------------------------------------
    Two problems, one answer.
@@ -575,7 +718,28 @@ $("#themeBtn").onclick=()=>{const c=root.getAttribute("data-theme");
 
 function sumW(){return GROUPS.reduce((a,g)=>a+(weights[g]||0),0)||1;}
 function composite(q){const s=sumW();return GROUPS.reduce((a,g)=>a+(weights[g]||0)*(q.indices[g]??50),0)/s;}
-function projOf(q){return Math.max(0, A + B*composite(q));}
+/* Index score -> points per game. A straight line when there are no bends;
+   otherwise the bent scale calibration.py fitted, straight between each pair of
+   bends. Past either end it keeps going at that end's slope rather than
+   flattening off, so an unusually high or low score still moves the number.
+   This has to stay identical to apply() in src/calibration.py -- there is a
+   test that projects the same board both ways and compares. */
+function ptsAt(c){
+  const n=KN.length;
+  if(n<2) return Math.max(0, A + B*c);
+  if(c<=KN[0][0]){const s=(KN[1][1]-KN[0][1])/(KN[1][0]-KN[0][0]);
+                  return Math.max(0, KN[0][1]+s*(c-KN[0][0]));}
+  if(c>=KN[n-1][0]){const s=(KN[n-1][1]-KN[n-2][1])/(KN[n-1][0]-KN[n-2][0]);
+                    return Math.max(0, KN[n-1][1]+s*(c-KN[n-1][0]));}
+  let i=1; while(i<n-1 && KN[i][0]<c) i++;
+  const x0=KN[i-1][0], y0=KN[i-1][1], x1=KN[i][0], y1=KN[i][1];
+  return Math.max(0, y0+(y1-y0)*(c-x0)/(x1-x0));
+}
+/* Points per index point right where this player sits. On a bent scale that
+   changes along the board, so the contribution bars read the local one instead
+   of one slope for everybody. */
+function slopeAt(c){return (ptsAt(c+0.5)-ptsAt(c-0.5));}
+function projOf(q){return ptsAt(composite(q));}
 
 function weightBars(){
   const s=sumW();
@@ -600,8 +764,15 @@ function sliders(){
 function syncSliderLabels(){const s=sumW();
   document.querySelectorAll('#sliders b[data-w]').forEach(b=>b.textContent=(100*(weights[b.dataset.w]||0)/s).toFixed(0)+"%");}
 
-const REPL=11; // replacement level ~ QB12 (12-team, 1QB)
-const TEAMS=REPL+1;    // the same league setting REPL is derived from
+/* Replacement level, as a 0-based index into the board sorted by projection.
+   ratings_meta.repl_rank is the RANK of the first unstartable player -- QB12 in a
+   12-team 1-QB league, RB30 in the same league once you count two starters plus
+   half the flex spots -- so the index is one less. The 11 is only a fallback for
+   a board built before ratings started publishing it. */
+const REPL=Math.max(0,(DATA.ratings_meta&&DATA.ratings_meta.repl_rank||12)-1);
+/* League size comes from the config now. It used to be REPL+1, which is right for
+   quarterbacks by coincidence and badly wrong for every other position. */
+const TEAMS=(DATA.ratings_meta&&DATA.ratings_meta.teams)||12;
 const RD10=TEAMS*10;   // pick 120: the last pick of Round 10, which is where Heath's screen starts
 function tiers(sorted){ // gap-based on proj
   const v=sorted.map(q=>q._p); if(v.length<2){sorted.forEach(q=>q._tier=1);return;}
@@ -641,14 +812,14 @@ function mktEdge(x,pf){
   const gap=mkt-mine;
   return {mine,mkt,gap,
     cls:gap<=-2?"val":gap>=2?"rch":"",
-    word:gap<=-2?`falls ${-gap} QB spots later than the market here — value`
-        :gap>=2?`goes ${gap} QB spots earlier than the market here — reach`
+    word:gap<=-2?`falls ${-gap} ${POS} spots later than the market here — value`
+        :gap>=2?`goes ${gap} ${POS} spots earlier than the market here — reach`
         :"in line with the market"};
 }
 function pfRank(x,pf){
   const e=mktEdge(x,pf), sel=pf===draftPlatform?" sel":"";
   if(e.mine==null)return `<span class="pfr e${sel}">—</span>`;
-  return `<span class="pfr ${e.cls}${sel}"${e.word?` title="${PLABEL[pf]||pf}: ${e.word}"`:""}>QB${e.mine}</span>`;
+  return `<span class="pfr ${e.cls}${sel}"${e.word?` title="${PLABEL[pf]||pf}: ${e.word}"`:""}>${POS}${e.mine}</span>`;
 }
 // Value/Reach is mode-aware: "consensus" = model vs the whole market; a platform =
 // that platform's price vs the MARKET column (Underdog + FFC blend). A player is a
@@ -669,12 +840,12 @@ function platEdgeLine(o){
   if(draftPlatform==="consensus")return "";
   const lab=PLABEL[draftPlatform]||draftPlatform, e=platEdge(o);
   if(e.mine==null)return `<div class="ovh">On ${lab}</div><div><span style="color:var(--muted)">not ranked on ${lab}</span></div>`;
-  if(e.mkt==null)return `<div class="ovh">On ${lab}</div><div><b>QB${e.mine}</b> <span style="color:var(--muted)">— no market price to compare</span></div>`;
+  if(e.mkt==null)return `<div class="ovh">On ${lab}</div><div><b>${POS}${e.mine}</b> <span style="color:var(--muted)">— no market price to compare</span></div>`;
   let verdict;
   if(e.gap>=2)verdict=`<span style="color:var(--neg)">▼ ${fmt(Math.abs(e.gap),0)} spots earlier than the market — reach on ${lab}</span>`;
   else if(e.gap<=-2)verdict=`<span style="color:var(--good)">▲ ${fmt(Math.abs(e.gap),0)} spots later than the market — value on ${lab}</span>`;
   else verdict=`<span style="color:var(--muted)">in line with the market</span>`;
-  return `<div class="ovh">On ${lab}</div><div><b>QB${e.mine}</b> here vs market <b>QB${e.mkt}</b> <span style="color:var(--muted)">(Underdog + FFC)</span> — ${verdict}</div>`;
+  return `<div class="ovh">On ${lab}</div><div><b>${POS}${e.mine}</b> here vs market <b>${POS}${e.mkt}</b> <span style="color:var(--muted)">(Underdog + FFC)</span> — ${verdict}</div>`;
 }
 const FLAGCLS={up:"g",down:"r",warn:"a"};
 /* --- Value in POINTS, not in draft slots --------------------------------
@@ -686,6 +857,23 @@ const FLAGCLS={up:"g",down:"r",warn:"a"};
 const RMETA=DATA.ratings_meta||{};
 const LWB=RMETA.lw_bars||{fpg:5,value_fpg:2,att_floor:55,att_high:100,rush_fpg:5};
 const CURVE=RMETA.curve||null;
+/* The two "big game" bars the boom rates were measured against. They are position
+   thresholds, not percentiles: 25 and 30 for a quarterback, 20 and 25 for a back,
+   because a 25-point game means something different at each spot. The page used to
+   print "25+" and "30+" as literal text, which would have mislabelled every number
+   in the RB ceiling column. */
+const BOOM=RMETA.boom||[25,30];
+/* The short label under a player's name. On the quarterback board that's his
+   archetype ("Konami", "Pocket Passer"), which is the single most useful thing
+   you can say about a QB in two words. Running backs have no archetype bucket in
+   this build -- rb_blend ships an empty string on purpose -- so the equivalent
+   two-word summary is how much of the backfield he owns, which is the thing that
+   actually decides his week. Falls back to an em dash when neither exists. */
+function styleLabel(x){
+  if(x.archetype)return x.archetype;
+  if(POS==="RB"&&x.bf_share!=null)return `${Math.round(x.bf_share*100)}% of backfield`;
+  return "";
+}
 function edgeFpg(x){return x.exp_fpg==null?null:projOf(x)-x.exp_fpg;}
 function edgeTag(v){return v==null?null:v>=LWB.fpg?"League winner":v>=LWB.value_fpg?"Value":v<=-LWB.value_fpg?"Pricey":null;}
 function flagChips(x){
@@ -707,7 +895,7 @@ function valuePointsLine(o){
      fallback would claim evidence that isn't there. */
   const basis=CURVE&&CURVE.source==="board"
     ?`vs the ${fmt(o.exp_fpg,1)} this year's price curve implies at that cost`
-    :`vs the ${fmt(o.exp_fpg,1)} QBs drafted around here have actually averaged`;
+    :`vs the ${fmt(o.exp_fpg,1)} ${POSPL} drafted around here have actually averaged`;
   return `${bdg(tag||"Fair price",cls)} <b>${sign}${fmt(e,1)} pts/gm</b>
     <span style="color:var(--muted)">— ${fmt(projOf(o),1)} projected ${basis}</span>${src}`;
 }
@@ -774,8 +962,8 @@ function adpTable(o){
   const rank=`<tr><th class="rh">Drafted at</th>`+
     PF.map(([k])=>{const e=mktEdge(o,k);
       return e.mine==null?'<td class="e">—</td>'
-        :`<td><span class="pfr ${e.cls}${sel(k)?" sel":""}">QB${e.mine}</span></td>`;}).join("")+
-    mkCell(o._market?`QB${o._market}`:"—",o._market?"":"e")+`</tr>`;
+        :`<td><span class="pfr ${e.cls}${sel(k)?" sel":""}">${POS}${e.mine}</span></td>`;}).join("")+
+    mkCell(o._market?`${POS}${o._market}`:"—",o._market?"":"e")+`</tr>`;
 
   const pick=PF.some(([k])=>o.adp_picks&&o.adp_picks[k]!=null)
     ?`<tr><th class="rh">Overall pick</th>`+
@@ -785,7 +973,7 @@ function adpTable(o){
     :"";
 
   const vsMkt=(MKT_SRC.length&&o._market)
-    ?`<tr><th class="rh" title="Two QB spots either way is the cutoff">vs market</th>`+
+    ?`<tr><th class="rh" title="Two ${POS} spots either way is the cutoff">vs market</th>`+
       PF.map(([k])=>{const e=mktEdge(o,k);
         if(e.gap==null)return '<td class="e">—</td>';
         if(e.gap<=-2)return `<td class="gd">${-e.gap} later</td>`;
@@ -796,7 +984,7 @@ function adpTable(o){
 
   const vb=o.value_by_platform||null;
   const vsMod=(vb&&PF.some(([k])=>vb[k]!=null))
-    ?`<tr><th class="rh" title="Where my projection ranks him against that site's price. Five QB spots either way is the cutoff — a model edge needs to be bigger than a site-to-site wobble to mean anything.">vs my model</th>`+
+    ?`<tr><th class="rh" title="Where my projection ranks him against that site's price. Five ${POS} spots either way is the cutoff — a model edge needs to be bigger than a site-to-site wobble to mean anything.">vs my model</th>`+
       PF.map(([k])=>{const g=vb[k];
         if(g==null)return '<td class="e">—</td>';
         if(g>=5)return `<td class="gd">${g} later</td>`;
@@ -826,9 +1014,10 @@ function overlays(o){
     <div class="ovh">Draft slot (ADP)</div><div>${adpTable(o)}</div>
     ${platEdgeLine(o)}
     <div class="ovh">Worth the pick?</div><div>${valuePointsLine(o)}</div>
-    <div class="ovh">League-winner shape</div><div>${lwChecklist(o)}</div>
+    ${(o.lw_checks&&o.lw_checks.length)
+      ? `<div class="ovh">League-winner shape</div><div>${lwChecklist(o)}</div>` : ""}
     <div class="ovh">Floor</div><div>${bdg(o.floor_bucket,FCLS[o.floor_bucket])} <span style="color:var(--muted)">bad-week baseline ≈ ${fmt(o.floor_pts,1)} pts/gm</span></div>
-    <div class="ovh">Ceiling</div><div>${bdg(o.ceiling_bucket,CCLS[o.ceiling_bucket])} <span style="color:var(--muted)">${o.boom25!=null?o.boom25:"–"}% of games 25+, ${o.boom30!=null?o.boom30:"–"}% 30+</span></div>
+    <div class="ovh">Ceiling</div><div>${bdg(o.ceiling_bucket,CCLS[o.ceiling_bucket])} <span style="color:var(--muted)">${o.boom25!=null?o.boom25:"–"}% of games ${BOOM[0]}+, ${o.boom30!=null?o.boom30:"–"}% ${BOOM[1]}+</span></div>
     <div class="ovh">Risk at ADP</div><div>${bdg(o.risk_bucket,RCLS[o.risk_bucket])} <span style="color:var(--muted)">${riskWhy(o)}</span></div>
     <div class="ovh">Tier / VOR</div><div>Tier ${o._tier||"–"} <span style="color:var(--muted)">·</span> ${o._vor!=null?fmt(o._vor*17,0)+" pts over replacement (season)":"–"}</div>
   </div>`;
@@ -983,26 +1172,26 @@ function similarQBs(q){
     const sp=n=>n===1?"spot":"spots";
     let cost,cls,tip;
     if(c.later==null){
-      cost=c.cost!=null?`QB${c.cost}`:"undrafted"; cls="same"; tip="no price to compare";
+      cost=c.cost!=null?`${POS}${c.cost}`:"undrafted"; cls="same"; tip="no price to compare";
     }else if(c.later>=1){
-      cost=`QB${c.cost} · ${c.later} ${sp(c.later)} later`; cls="later";
-      tip=`Goes ${c.later} QB ${sp(c.later)} later than ${q.name} on ${where} — you can still get him`;
+      cost=`${POS}${c.cost} · ${c.later} ${sp(c.later)} later`; cls="later";
+      tip=`Goes ${c.later} ${POS} ${sp(c.later)} later than ${q.name} on ${where} — you can still get him`;
     }else if(c.later<=-1){
-      cost=`QB${c.cost} · ${-c.later} ${sp(-c.later)} earlier`; cls="earlier";
-      tip=`Off the board ${-c.later} QB ${sp(-c.later)} before ${q.name} on ${where}`;
+      cost=`${POS}${c.cost} · ${-c.later} ${sp(-c.later)} earlier`; cls="earlier";
+      tip=`Off the board ${-c.later} ${POS} ${sp(-c.later)} before ${q.name} on ${where}`;
     }else{
-      cost=`QB${c.cost} · same spot`; cls="same"; tip="drafted in the same range";
+      cost=`${POS}${c.cost} · same spot`; cls="same"; tip="drafted in the same range";
     }
     return `<button class="simcard" type="button" data-goto="${c.x.rank}" title="${tip}">
       ${shot(c.x,"xs")}<span class="siminfo">
       <span class="nm">${c.x.name}<span class="tm">${c.x.team||""}</span></span>
-      <span class="mt">${c.x.archetype||"—"} · ${fmt(c.x._p)} pts/gm${meter}</span>
+      <span class="mt">${styleLabel(c.x)||"—"} · ${fmt(c.x._p)} pts/gm${meter}</span>
       <span class="cost ${cls}">${cost}</span></span></button>`;
   }).join("");
   /* The caption earns its keep but the rail is narrow, so it's kept to two lines:
      what the list is for, and the one thing that isn't obvious from the cards
      (whoever you can still get is listed first). */
-  return `<div class="sim"><h3>Similar QBs</h3>
+  return `<div class="sim"><h3>Similar ${POSPL}</h3>
     <div class="simcap">If he's gone or too pricey. Closest on style, factor mix and output
       at your weights — anyone you can <b>still get</b> on ${where} comes first.</div>
     <div class="simgrid">${cards}</div></div>`;
@@ -1021,8 +1210,8 @@ function fold(k,title,sub,body){
 }
 
 function detail(q,maxAbs){
-  const pts0=Math.max(0,A+B*50), s=sumW();
-  const contribs=GROUPS.map(g=>({g,c:B*((weights[g]||0)/s)*((q.indices[g]??50)-50),idx:q.indices[g]??50}));
+  const pts0=ptsAt(50), s=sumW(), SL=slopeAt(composite(q));
+  const contribs=GROUPS.map(g=>({g,c:SL*((weights[g]||0)/s)*((q.indices[g]??50)-50),idx:q.indices[g]??50}));
   const mA=Math.max(1,...contribs.map(x=>Math.abs(x.c)));
   const rows=contribs.map(x=>{const col=x.c>=0?"var(--pos)":"var(--neg)";
     const half=Math.max(2,Math.round(46*Math.abs(x.c)/mA));
@@ -1031,10 +1220,10 @@ function detail(q,maxAbs){
       <div class="wtk"><div class="wmid"></div><div class="wb" style="${st}"></div></div>
       <div class="v" style="color:${col}">${x.c>=0?"+":""}${fmt(x.c)}</div>`;}).join("");
   const feats=Object.entries(q.signals||{}).map(([k,v])=>`<tr><td class="k">${k}</td><td class="v">${fmt(v,2)}</td></tr>`).join("");
-  return `<div class="dhead"><div class="who">${shot(q)}<div><h3>${q.name} — ${q.archetype||""}</h3>
-      <div style="font-size:12.5px;color:var(--muted)">index 50 = league-average QB · bars are points added vs. average at the current weights</div></div></div>
+  return `<div class="dhead"><div class="who">${shot(q)}<div><h3>${q.name}${styleLabel(q)?" — "+styleLabel(q):""}</h3>
+      <div style="font-size:12.5px;color:var(--muted)">index 50 = league-average ${POS} · bars are points added vs. average at the current weights</div></div></div>
     <div style="text-align:right"><div class="big">${fmt(q._p)}<span style="font-size:13px;color:var(--muted);font-weight:400"> pts/gm</span></div>
-      <div style="font-size:12px;color:var(--muted)">avg QB ≈ ${fmt(pts0)}</div></div></div>
+      <div style="font-size:12px;color:var(--muted)">avg ${POS} ≈ ${fmt(pts0)}</div></div></div>
     <div class="dcols">
       <div class="dmain">${overlays(q)}
         ${fold("why","Why this projection",`${GROUPS.length} factors at your weights`,
@@ -1121,10 +1310,10 @@ function refresh(){
       `<tr class="row${isOpen?" open":""}${dim?" dim":""}${edge?" edge":""}" data-id="${x.rank}">
       <td class="rank num">${rank}</td>
       <td class="qb"><b>${x.name}</b>${teamCell(x.team)}
-        <span class="archtag">${x.archetype||""}</span>${x.mover?'<span class="move">NEW</span>':''}${valueTag(x)}</td>
+        <span class="archtag">${styleLabel(x)}</span>${x.mover?'<span class="move">NEW</span>':''}${valueTag(x)}</td>
       <td class="num"><span class="bartrack"><span class="bar" style="width:${w}px"></span></span>${fmt(x._p)}</td>
       ${PLATS.map(p=>`<td class="num pf">${pfRank(x,p)}</td>`).join("")}
-      ${MKT_SRC.length?`<td class="num mkt">${x._market?('QB'+x._market):'<span style="color:var(--muted)">—</span>'}</td>`:""}
+      ${MKT_SRC.length?`<td class="num mkt">${x._market?(POS+x._market):'<span style="color:var(--muted)">—</span>'}</td>`:""}
       <td>${bdg(x.floor_bucket,FCLS[x.floor_bucket])}</td>
       <td>${bdg(x.ceiling_bucket,CCLS[x.ceiling_bucket])}</td>
       <td>${bdg(x.risk_bucket,RCLS[x.risk_bucket])}</td>
@@ -1149,9 +1338,9 @@ function refresh(){
 }
 
 function header(){
-  const pf=PLATS.map(p=>`<th class="num${p===draftPlatform?" selcol":""}" title="${PLABEL[p]||p} ADP, as a QB rank — green where he falls later than the market, red where he goes earlier">${PLABEL[p]||p}</th>`).join("");
-  const mkt=MKT_SRC.length?`<th class="num mkt" title="Market = average of Underdog (best-ball) + FFC (season-long) QB ranks. The site columns are scored against this.">Market</th>`:"";
-  $("#thead").innerHTML=`<tr><th class="num">#</th><th>Quarterback</th><th class="num">Proj</th>${pf}${mkt}`+
+  const pf=PLATS.map(p=>`<th class="num${p===draftPlatform?" selcol":""}" title="${PLABEL[p]||p} ADP, as a ${POS} rank — green where he falls later than the market, red where he goes earlier">${PLABEL[p]||p}</th>`).join("");
+  const mkt=MKT_SRC.length?`<th class="num mkt" title="Market = average of Underdog (best-ball) + FFC (season-long) ${POS} ranks. The site columns are scored against this.">Market</th>`:"";
+  $("#thead").innerHTML=`<tr><th class="num">#</th><th>${POSLONG}</th><th class="num">Proj</th>${pf}${mkt}`+
     `<th>Floor</th><th>Ceiling</th><th>Risk</th><th>Why</th><th></th></tr>`;
 }
 $("#search").oninput=refresh;

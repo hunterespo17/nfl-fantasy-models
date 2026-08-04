@@ -35,7 +35,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from . import archetype, rankings, scoring
+from . import archetype, calibration, rankings, scoring
 
 # --- Model constants (validated on real QB seasons) -------------------------
 K_TD = 8.0          # TD regression: games needed to fully trust observed TDs
@@ -399,13 +399,16 @@ def composite(p: pd.DataFrame, weights: dict) -> pd.Series:
     return acc / total_w
 
 
-def calibrate(p: pd.DataFrame) -> tuple[float, float]:
-    """Least-squares map composite -> points: returns (a, b) for a + b*composite."""
-    d = p[p["actual_ppg"].notna() & p["composite"].notna()]
-    if len(d) < 5:
-        return 0.0, 0.25  # harmless fallback
-    b, a = np.polyfit(d["composite"].to_numpy(), d["actual_ppg"].to_numpy(), 1)
-    return float(a), float(b)
+def calibrate(p: pd.DataFrame, info: dict | None = None) -> tuple[float, float]:
+    """Map composite -> points per game. See src/calibration.py for the why.
+
+    This used to be a plain least-squares line across every QB who ever took a
+    snap. It carried the same two bugs the RB board had: the points were anchored
+    on a different crowd of players than the ADP curve they get subtracted from,
+    and the fitted line told QBs apart LESS well than their draft slot alone
+    does. Both are fixed in that one shared file so the two boards cannot drift.
+    """
+    return calibration.fit(p, pos="QB", info=info)
 
 
 def backtest(p: pd.DataFrame) -> dict:
@@ -440,7 +443,11 @@ def _empty(weights: dict, extra: dict | None = None) -> dict:
 def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
               extra: dict | None = None) -> dict:
     cur = cur.copy()
-    cur["proj_ppg"] = np.clip(a + b * cur["composite"], 0, None)
+    # The bends, when calibration managed to fit them. They live inside `extra`
+    # because both callers already hand their calibration detail through there.
+    # No bends -> apply() is the same straight line this always was.
+    knots = ((extra or {}).get("calibration") or {}).get("knots") or []
+    cur["proj_ppg"] = calibration.apply(cur["composite"], a, b, knots)
     cur["position"] = "QB"
     board = rankings.build_rankings(
         cur[["player_id", "player_name", "position", "proj_ppg"]], ppg_col="proj_ppg"
@@ -477,7 +484,11 @@ def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
             "signals": {label: round(float(row[col]), 2) for col, label in SIGNALS.items()
                         if col in row and pd.notna(row.get(col))},
         })
-    out = {"payload": payload, "calib": {"a": round(a, 3), "b": round(b, 4)}, "backtest": bt,
+    # The page recomputes every projection itself whenever a slider moves, so it
+    # needs the bends, not just the line. Same numbers, same order, both sides.
+    out = {"payload": payload,
+           "calib": {"a": round(a, 3), "b": round(b, 4), "knots": knots},
+           "backtest": bt,
            "weights": weights, "groups": [g for g in GROUPS if weights[g] > 0]}
     if extra:
         out.update(extra)
@@ -495,12 +506,15 @@ def run(weekly, team_season, players, scoring_rules, season, weights=None) -> di
     if prof.empty:
         return _empty(weights)
     prof = add_indices(prof, weights)
-    a, b = calibrate(prof)
+    cal: dict = {}
+    a, b = calibrate(prof, info=cal)
+    # backtest keeps its own plain least-squares fit on purpose, so its error
+    # score stays comparable to every run from before this change.
     bt = backtest(prof)
     cur = prof[(prof["season"] == season) & (prof["career_games"] >= 8)].copy()
     if cur.empty:
         return _empty(weights)
-    return _assemble(cur, a, b, bt, weights)
+    return _assemble(cur, a, b, bt, weights, {"calibration": cal})
 
 
 # ---------------------------------------------------------------------------
@@ -559,10 +573,13 @@ def run_upcoming(weekly, team_season, players, current_map, scoring_rules, seaso
 
     allp = pd.concat([hist, up], ignore_index=True, sort=False)
     allp = add_indices(allp, weights)
-    a, b = calibrate(allp)
+    cal: dict = {}
+    a, b = calibrate(allp, info=cal)
+    # See run() above: the backtest deliberately keeps the old fit.
     bt = backtest(allp)
 
     cur = allp[(allp["season"] == season) & (allp["career_games"] >= 8)].copy()
     if cur.empty:
         return _empty(weights, {"skipped_rookies": skipped})
-    return _assemble(cur, a, b, bt, weights, {"skipped_rookies": skipped})
+    return _assemble(cur, a, b, bt, weights,
+                     {"skipped_rookies": skipped, "calibration": cal})

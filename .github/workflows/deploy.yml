@@ -1,4 +1,4 @@
-name: Build & deploy QB board
+name: Build & deploy the boards
 
 # ── When to rebuild the board ────────────────────────────────────────────────
 on:
@@ -45,7 +45,32 @@ jobs:
       - name: Pull fresh nflverse data
         run: python scripts/01_pull_data.py --refresh
 
+      # The RB board runs FIRST and is allowed to fail. It is newer than the QB
+      # board and leans on depth charts and snap counts that can be thin in the
+      # offseason; a bad day for the backs must never take the QB board — the
+      # page you actually draft from — off the internet.
+      - name: Build the RB board (optional)
+        continue-on-error: true
+        env:
+          BOARD_SITE_LINKS: '1'
+        run: python scripts/11_build_rb_model.py
+
+      # Did it actually produce a page? The answer decides whether the QB board
+      # is rendered with a link across to it, so the link is never a dead one.
+      - name: Did the RB board build?
+        id: rbcheck
+        run: |
+          if [ -s outputs/rb_model.html ]; then
+            echo "has_rb=true" >> "$GITHUB_OUTPUT"
+            echo "RB board is $(wc -c < outputs/rb_model.html) bytes"
+          else
+            echo "has_rb=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::RB board did not build — deploying the QB board alone."
+          fi
+
       - name: Build the QB board
+        env:
+          BOARD_SITE_LINKS: ${{ steps.rbcheck.outputs.has_rb == 'true' && '1' || '0' }}
         run: python scripts/06_build_qb_model.py
 
       # Nice-to-have historical page. If it errors, the board still deploys.
@@ -57,12 +82,14 @@ jobs:
         run: |
           mkdir -p site
           cp outputs/qb_model.html site/index.html
+          if [ -f outputs/rb_model.html ]; then cp outputs/rb_model.html site/rb.html; fi
           if [ -f outputs/qb_backtest.html ]; then cp outputs/qb_backtest.html site/backtest.html; fi
 
       - name: Sanity-check the board built
         run: |
           test -s site/index.html || { echo "::error::Board HTML is missing or empty"; exit 1; }
-          echo "Board is $(wc -c < site/index.html) bytes"
+          echo "QB board is $(wc -c < site/index.html) bytes"
+          if [ -s site/rb.html ]; then echo "RB board is $(wc -c < site/rb.html) bytes"; fi
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

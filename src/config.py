@@ -49,10 +49,16 @@ FANTASY_POSITIONS = ["QB", "RB", "WR", "TE"]
 # ---------------------------------------------------------------------------
 # Scoring settings  --  change these to match YOUR league
 # ---------------------------------------------------------------------------
-# The defaults below are standard "full PPR" (1 point per reception).
-#   - For HALF-PPR set "reception": 0.5
+# Set to HALF-PPR (0.5 per reception) to match Hunter's league.
+#   - For FULL PPR set "reception": 1.0
 #   - For STANDARD (non-PPR) set "reception": 0.0
 # See src/scoring.py for exactly how each weight is applied.
+#
+# This setting does more work than it looks like it does. Every fantasy point in
+# the project is computed through src/scoring.py from these weights, so the RB
+# expectation curve, the backtest, and replacement level all move with it. It does
+# NOT change the QB board (quarterbacks don't catch passes), so the published QB
+# rankings are unaffected -- only the "Half PPR" label on them changes.
 SCORING = {
     "passing_yards": 0.04,    # 1 point per 25 passing yards
     "passing_td": 4.0,
@@ -61,7 +67,7 @@ SCORING = {
     "rushing_yards": 0.1,     # 1 point per 10 rushing yards
     "rushing_td": 6.0,
     "rushing_2pt": 2.0,
-    "reception": 1.0,         # <-- 1.0 PPR | 0.5 half-PPR | 0.0 standard
+    "reception": 0.5,         # <-- 1.0 PPR | 0.5 half-PPR | 0.0 standard
     "receiving_yards": 0.1,   # 1 point per 10 receiving yards
     "receiving_td": 6.0,
     "receiving_2pt": 2.0,

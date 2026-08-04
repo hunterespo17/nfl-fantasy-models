@@ -42,9 +42,46 @@ from . import scoring
 
 RECENCY = 5           # only the last N seasons of games count (matches talent)
 DECAY = 0.82          # per-year recency decay on game weights
-BOOM1, BOOM2 = 25.0, 30.0   # the two "huge game" thresholds
+BOOM1, BOOM2 = 25.0, 30.0   # the two "huge game" thresholds (QB defaults)
 K_SHRINK = 10.0       # sample-size shrink strength (in recency-weighted games)
 REPL_RANK = 12        # QB12 ~ replacement in a 12-team, 1QB league
+
+# --- What changes from one position to the next -----------------------------
+# Everything else in this file is position-neutral. These five knobs are not,
+# and hard-coding the quarterback values would quietly mis-grade a back:
+#
+#   boom       A 25-point game is a big QB week. For a half-PPR back it is a
+#              monster -- backs score less, so the bar comes down with them.
+#              Set from the scoring format, not from taste: an RB1 averages
+#              roughly 15-16 pts/gm in half PPR against a QB1's 20-22.
+#   repl       Replacement level. Read from config.LEAGUE at runtime where we
+#              can (RB30 in a 12-team league with a flex), with these as the
+#              fallback if that lookup ever fails.
+#   reach      How many ranking spots of "reach" counts as a full one. There are
+#              32 startable quarterbacks and eighty-odd draftable backs, so five
+#              spots means much less on an RB board than on a QB board.
+#   gap_bar    Same idea for the Value/Reach label in rank space.
+#   old_age    When age becomes a red flag. 34 for QBs. For backs it's 28 --
+#              85% of league-winning RB seasons came from players 27 or younger.
+POS_SETTINGS = {
+    "QB": {"boom": (25.0, 30.0), "repl": 12, "reach": 8.0, "gap_bar": 5, "old_age": 34},
+    "RB": {"boom": (20.0, 25.0), "repl": 30, "reach": 16.0, "gap_bar": 10, "old_age": 28},
+    "WR": {"boom": (20.0, 25.0), "repl": 36, "reach": 16.0, "gap_bar": 10, "old_age": 31},
+    "TE": {"boom": (15.0, 20.0), "repl": 12, "reach": 8.0, "gap_bar": 5, "old_age": 33},
+}
+
+
+def _settings(pos: str) -> dict:
+    """Position knobs, with replacement level read from the live league config."""
+    s = dict(POS_SETTINGS.get(str(pos).upper(), POS_SETTINGS["QB"]))
+    try:
+        from . import rankings
+        r = rankings.replacement_ranks().get(str(pos).upper())
+        if r:
+            s["repl"] = int(r)
+    except Exception:      # noqa: BLE001 -- fall back to the table above
+        pass
+    return s
 
 # --- League-winner thresholds ----------------------------------------------
 # Every number below is quoted from the research, not invented here:
@@ -78,10 +115,10 @@ def _first(df, names):
 # ---------------------------------------------------------------------------
 # per-game history -> raw floor / boom metrics
 # ---------------------------------------------------------------------------
-def _game_fp(weekly: pd.DataFrame, rules: dict | None) -> pd.DataFrame:
-    pos = _first(weekly, ["position", "position_group"]).astype(str).str.upper()
+def _game_fp(weekly: pd.DataFrame, rules: dict | None, pos: str = "QB") -> pd.DataFrame:
+    pcol = _first(weekly, ["position", "position_group"]).astype(str).str.upper()
     st = _first(weekly, ["season_type"])
-    m = (pos == "QB")
+    m = (pcol == str(pos).upper())
     if st is not None and st.notna().any():
         m = m & (st.astype(str).str.upper() == "REG")
     w = weekly[m]
@@ -92,16 +129,21 @@ def _game_fp(weekly: pd.DataFrame, rules: dict | None) -> pd.DataFrame:
     return out.dropna(subset=["season"])
 
 
-def _actual_ppg_by_season(weekly: pd.DataFrame, rules: dict | None) -> dict:
-    """{(season, normalized_name): actual REG-season fantasy pts/gm} for QBs.
+def _actual_ppg_by_season(weekly: pd.DataFrame, rules: dict | None,
+                          pos: str = "QB") -> dict:
+    """{(season, normalized_name): actual REG-season fantasy pts/gm} for ONE position.
 
     Keyed by NAME rather than player_id on purpose: the historical ADP file is a
     hand-kept list of names with no nflverse ids in it, and `adp.norm` is the
     same normalizer the live ADP join already uses.
+
+    `pos` matters more than it looks: this is what the expectation curve is fit
+    against, and pooling positions here would fit one curve to two completely
+    different scoring distributions.
     """
-    pos = _first(weekly, ["position", "position_group"]).astype(str).str.upper()
+    pcol = _first(weekly, ["position", "position_group"]).astype(str).str.upper()
     st = _first(weekly, ["season_type"])
-    m = (pos == "QB")
+    m = (pcol == str(pos).upper())
     if st is not None and st.notna().any():
         m = m & (st.astype(str).str.upper() == "REG")
     w = weekly[m]
@@ -155,7 +197,8 @@ def _wpctile(vals: np.ndarray, wts: np.ndarray, q: float) -> float:
     return float(np.interp(q, cw, v))
 
 
-def raw_metrics(gl: pd.DataFrame, latest: int) -> dict:
+def raw_metrics(gl: pd.DataFrame, latest: int,
+                boom1: float = BOOM1, boom2: float = BOOM2) -> dict:
     """player_id -> {floor_raw, boom1, boom2, n_eff} from recency-weighted games."""
     out = {}
     for pid, d in gl.groupby("player_id"):
@@ -169,8 +212,8 @@ def raw_metrics(gl: pd.DataFrame, latest: int) -> dict:
             continue
         out[pid] = {
             "floor_raw": _wpctile(fp, wt, 0.25),
-            "boom1": float(wt[fp >= BOOM1].sum() / n),
-            "boom2": float(wt[fp >= BOOM2].sum() / n),
+            "boom1": float(wt[fp >= boom1].sum() / n),
+            "boom2": float(wt[fp >= boom2].sum() / n),
             "n_eff": n,
         }
     return out
@@ -227,17 +270,148 @@ def _risk_buckets(payload):
 
 
 # ---------------------------------------------------------------------------
+# cheat-sheet flags
+# ---------------------------------------------------------------------------
+# Short, tone-coded reasons shown on each card: why this player, in six words.
+#
+# These are DELIBERATELY position-specific. "Elite rusher" is the highest praise
+# you can give a quarterback and a description of the job for a running back, so
+# a shared flag list would say nothing about either. Each branch below reads only
+# the indices its own model actually produces.
+#
+# One rule holds across both: nothing here may depend on proj_ppg. The reader
+# drags weight sliders and the projection moves underneath these flags, so any
+# "+N over ADP" style chip is built in the browser instead. Everything baked in
+# here is weight-independent.
+def _flags(payload: list, pos: str, S: dict) -> None:
+    """Attach q['flags'] -- a list of [tone, text], tone in up/down/warn."""
+    pos = str(pos).upper()
+    old_age = S.get("old_age", 34)
+
+    for q in payload:
+        ix = q.get("indices", {})
+        cg, age = q.get("career_games"), q.get("age")
+        f = []
+
+        if pos == "RB":
+            # Built as two lists, good news and bad, so that trimming to six can't
+            # starve the warnings. A back with six flattering chips and a torn ACL
+            # would otherwise show six flattering chips.
+            up, dn = [], []
+
+            # ROLE FIRST. Everything else is a tiebreaker next to how much of the
+            # backfield a player actually owns, so these lead the chip row.
+            bf = q.get("bf_share")
+            if bf is not None and bf >= 0.65:
+                up.append(["up", "Bellcow"])
+            elif bf is not None and bf <= 0.35:
+                dn.append(["down", "Committee"])
+            # Receiving work. 79 targets is the average of Heath's top-20
+            # league-winning backs; it's an absolute bar, not a percentile.
+            tp = q.get("targets_pace")
+            if tp is not None and tp >= 79:
+                up.append(["up", f"{int(tp)}-target pace"])
+            elif tp is not None and tp <= 30:
+                dn.append(["down", "No pass game role"])
+            snap = q.get("snap_pct")
+            if snap is not None and snap >= 65:
+                up.append(["up", "Every-down snaps"])
+
+            # AGE AND CAREER STAGE. The strongest single filter in the research:
+            # the average league-winning back was 25.1, and 85% of those seasons
+            # came from players 27 or younger.
+            #
+            # The two age chips are worded differently on purpose. The old-age one
+            # names the number because the number is the alarm; the young one names
+            # the quality, because "Age 25" in green beside "Age 29" in red is two
+            # chips that look identical and mean opposite things.
+            if age is not None and age <= 25:
+                up.append(["up", "Prime age"])
+            # Ascending: still cheap, still climbing. Roughly the first two years
+            # of games, which is where the rookie-contract edge lives.
+            if cg is not None and 10 <= cg <= 40:
+                up.append(["up", "Ascending"])
+            if age is not None and age >= old_age:
+                dn.append(["down", f"Age {age}"])
+
+            # TEAM AND EFFICIENCY -- real, but they move a back less than his role.
+            veg = ix.get("Vegas", 50)
+            if veg >= 70:
+                up.append(["up", "Winning offense"])
+            elif veg <= 32:
+                dn.append(["down", "Weak team"])
+            eff = ix.get("Efficiency", 50)
+            if eff >= 75:
+                up.append(["up", "Efficient"])
+            elif eff <= 25:
+                dn.append(["down", "Inefficient"])
+
+            # Last season's games per 17, NOT the Availability index -- that index
+            # is age times durability, so reading it here would flag every healthy
+            # older back as hurt and double-count the age chip above. The bar is
+            # six missed games, which nobody argues with.
+            dur = q.get("durability")
+            if dur is not None and dur <= 0.65:
+                dn.append(["warn", "Missed time"])
+            if q.get("mover"):
+                dn.append(["warn", "New team"])
+
+            # Three of each guaranteed, then backfill from whichever side has more
+            # left to say.
+            f = up[:3] + dn[:3]
+            for extra in up[3:] + dn[3:]:
+                if len(f) >= 6:
+                    break
+                f.append(extra)
+            q["flags"] = f
+            continue
+
+        # ---- quarterbacks (unchanged) ----
+        if cg is not None and 10 <= cg <= 40:
+            f.append(["up", "Ascending"])        # the one profile the market underrates
+        if ix.get("Rushing", 50) >= 72:
+            f.append(["up", "Elite rusher"])
+        # League-winner reads, from the checklist above. "Elite rusher" is a
+        # percentile (best of THIS field); these are absolute bars, so a whole
+        # weak field can miss them and a whole strong one can clear them.
+        pace = q.get("rush_att_pace")
+        if pace is not None and pace >= RUSH_ATT_HIGH:
+            f.append(["up", f"{RUSH_ATT_HIGH}+ rush pace"])
+        elif pace is not None and pace < RUSH_ATT_FLOOR:
+            f.append(["down", "No rush floor"])
+        veg = ix.get("Vegas", 50)
+        if veg >= 70:
+            f.append(["up", "Strong team"])
+        elif veg <= 32:
+            f.append(["down", "Weak team"])
+        cast = ix.get("Cast & OL", 50)
+        if cast >= 70:
+            f.append(["up", "Loaded cast"])
+        elif cast <= 32:
+            f.append(["down", "Thin cast"])
+        if q.get("mover"):
+            f.append(["warn", "New team"])
+        if age is not None and age >= old_age:
+            f.append(["down", f"Age {age}"])
+        q["flags"] = f[:6]
+
+
+# ---------------------------------------------------------------------------
 # main entry
 # ---------------------------------------------------------------------------
 def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
-           adp_df: pd.DataFrame, cfg) -> dict:
+           adp_df: pd.DataFrame, cfg, pos: str = "QB") -> dict:
     payload = result.get("payload", [])
     if not payload:
         return result
+    pos = str(pos).upper().strip()
+    S = _settings(pos)
+    boom1, boom2 = S["boom"]
+    repl_rank = S["repl"]
 
-    gl = _game_fp(weekly, scoring_rules)
+    gl = _game_fp(weekly, scoring_rules, pos)
     latest = int(gl["season"].max()) if not gl.empty else int(getattr(cfg, "CURRENT_SEASON", 2025))
-    raw = raw_metrics(gl, latest)
+    raw = raw_metrics(gl, latest, boom1, boom2)
 
     have = [raw[q["player_id"]] for q in payload if q.get("player_id") in raw]
     pool_floor = float(np.median([r["floor_raw"] for r in have])) if have else 12.0
@@ -264,16 +438,20 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
             q["_cscore"] = pool_b1 + pool_b2
             q["_games"] = 0.0
 
-    # ADP -> per-platform QB ranks + a consensus anchor (drives value/risk).
-    pranks = adp_mod.platform_qb_ranks(adp_df)
-    crank, _cscore = adp_mod.consensus_ranks(adp_df, pranks)
-    picks = adp_mod.raw_picks(adp_df)
+    # ADP -> per-platform positional ranks + a consensus anchor (drives value/risk).
+    pranks = adp_mod.platform_pos_ranks(adp_df, pos)
+    crank, _cscore = adp_mod.consensus_ranks(adp_df, pranks, pos)
+    picks = adp_mod.raw_picks(adp_df, pos)
     for q in payload:
         k = adp_mod.norm(q["name"])
-        q["adp_platforms"] = {pf: pranks[pf].get(k) for pf in adp_mod.PLATFORMS}   # QB# per platform
+        # .get(pf, {}) and not pranks[pf]: a platform only appears in pranks when it
+        # actually carries numbers for this position. A file with running-back ADP
+        # from one site and not the others is the normal case, not an error.
+        q["adp_platforms"] = {pf: pranks.get(pf, {}).get(k)                        # pos# per platform
+                              for pf in adp_mod.PLATFORMS}
         q["adp_picks"] = picks.get(k, {pf: None for pf in adp_mod.PLATFORMS})       # raw overall pick
-        q["adp_pos_rank"] = int(crank[k]) if k in crank else None                   # consensus QB#
-        q["adp_label"] = f"QB{q['adp_pos_rank']}" if q["adp_pos_rank"] else "UDFA"
+        q["adp_pos_rank"] = int(crank[k]) if k in crank else None                   # consensus pos#
+        q["adp_label"] = f"{pos}{q['adp_pos_rank']}" if q["adp_pos_rank"] else "UDFA"
         q["value_by_platform"] = {pf: (pranks[pf][k] - q["rank"])                   # +: falls past model
                                   for pf in adp_mod.PLATFORMS if k in pranks.get(pf, {})}
 
@@ -292,16 +470,17 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
             q["value_tag"] = None
             q["_risk"] = 0.0
             continue
-        cost = min(max((REPL_RANK - apr) / (REPL_RANK - 1), 0.0), 1.0)   # QB1~1, QB12+~0
+        cost = min(max((repl_rank - apr) / max(repl_rank - 1, 1), 0.0), 1.0)  # 1st~1, replacement~0
         downside = 1 - q["_fpct"]        # weak floor
         no_upside = 1 - q["_cpct"]       # thin ceiling (a high ceiling forgives a lot)
-        reach = min(max((q["rank"] - apr) / 8.0, 0.0), 1.0)             # going ahead of the model
+        reach = min(max((q["rank"] - apr) / S["reach"], 0.0), 1.0)       # going ahead of the model
         # A premium pick is risky when it's shaky (weak floor AND/OR no ceiling to
         # justify it) or a reach past the model. High ceiling meaningfully offsets.
         q["_risk"] = cost * (0.40 * downside + 0.25 * no_upside + 0.35 * reach)
         vg = apr - q["rank"]                     # +: falls past where model ranks him = value
         q["value_gap"] = int(vg)
-        q["value_tag"] = "Value" if vg >= 5 else ("Reach" if vg <= -5 else None)
+        bar = S["gap_bar"]
+        q["value_tag"] = "Value" if vg >= bar else ("Reach" if vg <= -bar else None)
 
     _risk_buckets(payload)
 
@@ -314,7 +493,7 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
     # "he beats what his draft slot is historically worth, by N points a game" --
     # which is the version that decides a season.
     curve = adp_mod.fit_expectation_curve(
-        adp_mod.load_adp_history(), _actual_ppg_by_season(weekly, scoring_rules)
+        adp_mod.load_adp_history(), _actual_ppg_by_season(weekly, scoring_rules, pos), pos
     )
     if not curve:
         # No history file (or it wouldn't join): fall back to the shape of THIS
@@ -323,6 +502,12 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
         bp = [(p, q["proj_ppg"]) for q in payload
               for p, _src in [_curve_pick(q)] if p is not None and q.get("proj_ppg") is not None]
         curve = adp_mod.fit_curve_from_board([p for p, _ in bp], [v for _, v in bp]) if bp else {}
+
+    # Who was in the historical ADP file but never found in the stats. Lifted OFF
+    # the curve so it stays a build-time diagnostic and never ships to the page,
+    # but kept on the result so the build script can print it -- a name that
+    # silently fails to join is the one failure mode this whole join has.
+    result["curve_missed"] = curve.pop("missed_names", []) if curve else []
 
     for q in payload:
         pick, src = _curve_pick(q)
@@ -338,7 +523,32 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
                               else "Value" if edge >= VAL_FPG_EDGE
                               else "Pricey" if edge <= OVERPRICED_FPG else None)
 
-    # ---- League-winner checklist -------------------------------------------
+    # ---- League-winner checklist (QUARTERBACKS ONLY) -----------------------
+    # Every threshold below is a quarterback threshold. The running-back version
+    # of this screen -- first four seasons in the league or already a previous
+    # league-winner, plus the archetype curve -- needs the contract and XFP-share
+    # data that tier 2 brings in, so for now an RB board simply carries no gate
+    # rather than being graded against bars that were never about backs.
+    if pos != "QB":
+        for q in payload:
+            q["lw_gate"] = None
+            q["lw_gate_via"] = []
+            q["lw_checks"] = []
+            q["lw_score"] = 0
+            q["lw_max"] = 0
+        _flags(payload, pos, S)
+        result["ratings_meta"] = {
+            "adp_source": adp_mod.source_label(adp_df, pos),
+            "pos": pos,
+            "boom": [int(boom1), int(boom2)],
+            "repl_rank": int(repl_rank),
+            "teams": int(getattr(cfg, "LEAGUE", {}).get("teams", 12) or 12),  # see note below
+            "n_with_adp": sum(1 for q in payload if q.get("adp_pos_rank")),
+            "curve": curve or None,
+            "lw_bars": {"fpg": LW_FPG_EDGE, "value_fpg": VAL_FPG_EDGE},
+        }
+        return result
+
     # Published thresholds, not vibes. Deliberately a CHECKLIST and not another
     # weighted factor: it answers "does he have the shape that wins leagues",
     # which is a different question from "how many points will he score" and
@@ -408,46 +618,19 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
         q["lw_max"] = sum(1 for c in checks if c["pass"] is not None)
 
     # cheat-sheet "why" flags -- transparent, factor-based reasons, tone-coded.
-    for q in payload:
-        ix = q.get("indices", {})
-        cg, age = q.get("career_games"), q.get("age")
-        f = []
-        if cg is not None and 10 <= cg <= 40:
-            f.append(["up", "Ascending"])        # the one profile the market underrates
-        if ix.get("Rushing", 50) >= 72:
-            f.append(["up", "Elite rusher"])
-        # League-winner reads, from the checklist above. "Elite rusher" is a
-        # percentile (best of THIS field); these are absolute bars, so a whole
-        # weak field can miss them and a whole strong one can clear them.
-        # NOTE: the "+N over ADP" chip is deliberately NOT added here. It depends
-        # on the projection, and the projection moves live when the reader drags
-        # a weight slider -- so the report builds that chip in the browser from
-        # the current weights. Everything below is weight-independent and safe
-        # to bake in.
-        pace = q.get("rush_att_pace")
-        if pace is not None and pace >= RUSH_ATT_HIGH:
-            f.append(["up", f"{RUSH_ATT_HIGH}+ rush pace"])
-        elif pace is not None and pace < RUSH_ATT_FLOOR:
-            f.append(["down", "No rush floor"])
-        veg = ix.get("Vegas", 50)
-        if veg >= 70:
-            f.append(["up", "Strong team"])
-        elif veg <= 32:
-            f.append(["down", "Weak team"])
-        cast = ix.get("Cast & OL", 50)
-        if cast >= 70:
-            f.append(["up", "Loaded cast"])
-        elif cast <= 32:
-            f.append(["down", "Thin cast"])
-        if q.get("mover"):
-            f.append(["warn", "New team"])
-        if age is not None and age >= 34:
-            f.append(["down", f"Age {age}"])
-        q["flags"] = f[:6]
+    _flags(payload, pos, S)
 
     result["ratings_meta"] = {
-        "adp_source": adp_mod.source_label(adp_df),
-        "boom": [int(BOOM1), int(BOOM2)],
+        "adp_source": adp_mod.source_label(adp_df, pos),
+        "pos": pos,
+        "boom": [int(boom1), int(boom2)],
+        "repl_rank": int(repl_rank),
+        # League size, published separately from repl_rank on purpose. For a 1-QB
+        # league the two happen to match (12 teams -> QB12) and the report used to
+        # back league size out of the replacement rank. That coincidence does not
+        # survive contact with running backs, where replacement is RB30 in the same
+        # 12-team league, so the page reads the real number from here.
+        "teams": int(getattr(cfg, "LEAGUE", {}).get("teams", 12) or 12),
         "n_with_adp": sum(1 for q in payload if q.get("adp_pos_rank")),
         "curve": curve or None,
         "lw_bars": {"fpg": LW_FPG_EDGE, "value_fpg": VAL_FPG_EDGE,

@@ -6,13 +6,24 @@ small, refreshable CSV. Different platforms draft QBs very differently -- ESPN
 pools fade them hard, Sleeper takes them earliest, Underdog (best-ball) sits in
 between -- so we keep each platform separate and also blend a consensus.
 
-    data/adp.csv columns:  player, sleeper, espn, underdog, ffc
+    data/adp.csv columns:  player, pos, sleeper, espn, underdog, ffc
        (each value is that platform's overall ADP pick number; blank = undrafted)
 
 We convert each platform's raw ADP into a POSITIONAL rank (QB1, QB2, ...), which
 is both what "where he's drafted within the position" means and the only unit
 comparable across platforms with different pool depths. The consensus rank is
-the average of a QB's available per-platform ranks, re-ranked 1..N.
+the average of a player's available per-platform ranks, re-ranked 1..N.
+
+EVERYTHING IN HERE IS PER POSITION. That is not decoration -- it is the whole
+reason the file was changed. Running backs outscore quarterbacks in half-PPR and
+go much earlier, so pooling the two into one list would rank a mid-tier back
+above a good quarterback and, worse, fit a single expectation curve across both.
+Against a pooled curve every running back looks like a steal. It would read like
+the model found an edge; it would only have found a mixed-up list.
+
+`pos` is optional in the CSV. When it's missing every row is treated as a QB,
+which is exactly what the file used to contain -- so an old file keeps working
+and produces the same numbers it always did.
 
 To refresh: replace data/adp.csv (same columns). Nothing else changes.
 """
@@ -49,19 +60,46 @@ def norm(name) -> str:
     return _ALIAS.get(s, s)
 
 
+DEFAULT_POS = "QB"      # what a row means when the file has no `pos` column
+
+
+def _with_pos(df: pd.DataFrame) -> pd.DataFrame:
+    """Guarantee a clean upper-case `pos` column, defaulting to QB."""
+    if "pos" in df.columns:
+        df["pos"] = df["pos"].astype(str).str.upper().str.strip().replace(
+            {"": DEFAULT_POS, "NAN": DEFAULT_POS, "NONE": DEFAULT_POS})
+    else:
+        df["pos"] = DEFAULT_POS
+    return df
+
+
 def load_adp(path=None) -> pd.DataFrame:
     """Read the multi-platform ADP CSV; empty frame if missing/unreadable."""
     p = path or (config.DATA_DIR / "adp.csv")
     try:
         df = pd.read_csv(p)
     except Exception:
-        return pd.DataFrame(columns=["player", "key", *PLATFORMS])
+        return pd.DataFrame(columns=["player", "pos", "key", *PLATFORMS])
     if "player" not in df.columns:
-        return pd.DataFrame(columns=["player", "key", *PLATFORMS])
+        return pd.DataFrame(columns=["player", "pos", "key", *PLATFORMS])
+    df = _with_pos(df)
     df["key"] = df["player"].map(norm)
     for pf in PLATFORMS:
         df[pf] = pd.to_numeric(df[pf], errors="coerce") if pf in df.columns else pd.NA
-    return df.drop_duplicates("key", keep="first").reset_index(drop=True)
+    # De-duplicate WITHIN a position, not across the file. Two different players
+    # can normalize to the same key across positions far more easily than within
+    # one, and dropping a running back because a quarterback shares his name
+    # would be a silent, invisible bug.
+    return df.drop_duplicates(["pos", "key"], keep="first").reset_index(drop=True)
+
+
+def for_pos(adp_df: pd.DataFrame, pos: str | None) -> pd.DataFrame:
+    """Just the rows for one position (all rows when pos is None)."""
+    if adp_df is None or adp_df.empty or pos is None:
+        return adp_df
+    if "pos" not in adp_df.columns:
+        return adp_df if str(pos).upper() == DEFAULT_POS else adp_df.iloc[0:0]
+    return adp_df[adp_df["pos"] == str(pos).upper()]
 
 
 def has_platforms(adp_df: pd.DataFrame) -> list[str]:
@@ -71,23 +109,36 @@ def has_platforms(adp_df: pd.DataFrame) -> list[str]:
     return [pf for pf in PLATFORMS if pf in adp_df.columns and adp_df[pf].notna().any()]
 
 
-def platform_qb_ranks(adp_df: pd.DataFrame) -> dict:
-    """{platform: {key: qb_positional_rank}} -- rank within each platform's QBs."""
+def platform_pos_ranks(adp_df: pd.DataFrame, pos: str | None = DEFAULT_POS) -> dict:
+    """{platform: {key: positional_rank}} -- rank within ONE position's players.
+
+    The rank is computed after filtering to `pos`, so RB1 means the first back
+    off the board and not "the first back once you've counted the quarterbacks".
+    """
+    sub_all = for_pos(adp_df, pos)
     out = {}
-    for pf in has_platforms(adp_df):
-        sub = adp_df.dropna(subset=[pf]).sort_values(pf)
+    if sub_all is None or sub_all.empty:
+        return out
+    for pf in has_platforms(sub_all):
+        sub = sub_all.dropna(subset=[pf]).sort_values(pf)
         out[pf] = {k: i + 1 for i, k in enumerate(sub["key"])}
     return out
 
 
-def consensus_ranks(adp_df: pd.DataFrame, pranks: dict) -> tuple[dict, dict]:
-    """(consensus_qb_rank, mean_of_platform_ranks) keyed by normalized name.
+def platform_qb_ranks(adp_df: pd.DataFrame) -> dict:
+    """Back-compat alias for the QB call site."""
+    return platform_pos_ranks(adp_df, DEFAULT_POS)
 
-    Consensus = average of a QB's available per-platform QB-ranks, then the
-    field is re-ranked 1..N so the anchor is a clean QB positional rank.
+
+def consensus_ranks(adp_df: pd.DataFrame, pranks: dict,
+                    pos: str | None = DEFAULT_POS) -> tuple[dict, dict]:
+    """(consensus_positional_rank, mean_of_platform_ranks) keyed by normalized name.
+
+    Consensus = average of a player's available per-platform ranks, then the
+    field is re-ranked 1..N so the anchor is a clean positional rank.
     """
     score = {}
-    for _, r in adp_df.iterrows():
+    for _, r in for_pos(adp_df, pos).iterrows():
         k = r["key"]
         vals = [pranks[pf][k] for pf in pranks if k in pranks[pf]]
         if vals:
@@ -97,20 +148,38 @@ def consensus_ranks(adp_df: pd.DataFrame, pranks: dict) -> tuple[dict, dict]:
     return crank, score
 
 
-def raw_picks(adp_df: pd.DataFrame) -> dict:
-    """{key: {platform: overall_pick_or_None}}."""
+def raw_picks(adp_df: pd.DataFrame, pos: str | None = DEFAULT_POS) -> dict:
+    """{key: {platform: overall_pick_or_None}} for one position's rows.
+
+    Filtered by position on purpose. The dict is keyed by normalized name, and
+    once the file holds more than one position two different players can share a
+    key -- at which point the last row read silently wins and a back inherits a
+    quarterback's draft picks. Filtering first makes that collision impossible.
+    """
+    sub = for_pos(adp_df, pos)
     out = {}
-    for _, r in adp_df.iterrows():
+    if sub is None or sub.empty:
+        return out
+    for _, r in sub.iterrows():
         out[r["key"]] = {
-            pf: (round(float(r[pf]), 1) if pf in adp_df.columns and pd.notna(r[pf]) else None)
+            pf: (round(float(r[pf]), 1) if pf in sub.columns and pd.notna(r[pf]) else None)
             for pf in PLATFORMS
         }
     return out
 
 
-def source_label(adp_df: pd.DataFrame) -> str:
-    pfs = has_platforms(adp_df)
-    return " / ".join(PLATFORM_LABEL[p] for p in pfs) + " 2026" if pfs else "ADP"
+def source_label(adp_df: pd.DataFrame, pos: str | None = None) -> str:
+    """Name the platforms whose prices the board is actually showing.
+
+    Filtered by position, because the file will not be evenly filled: the
+    quarterback rows carry four sites and the running-back rows carry only FFC.
+    An unfiltered label on the RB board would credit three sites that contributed
+    nothing to it -- a small lie, but the kind that makes you trust a number you
+    shouldn't.
+    """
+    pfs = has_platforms(for_pos(adp_df, pos) if pos else adp_df)
+    year = getattr(config, "UPCOMING_SEASON", "")
+    return " / ".join(PLATFORM_LABEL[p] for p in pfs) + f" {year}".rstrip() if pfs else "ADP"
 
 
 # ---------------------------------------------------------------------------
@@ -122,19 +191,26 @@ def source_label(adp_df: pd.DataFrame) -> str:
 # what his draft slot is worth by +5 pts/gm wins you weeks; one who beats it by
 # two ranking spots may win you nothing.
 #
-# The curve is fit on real history -- data/adp_history.csv (FFC QB ADP by year)
-# joined to what those QBs actually averaged that season:
+# The curve is fit on real history -- data/adp_history.csv (FFC ADP by year)
+# joined to what those players actually averaged that season:
 #
 #     expected_fpg(pick) = a + b * ln(pick)          (b is negative)
 #
 # Log, not linear, because draft cost is compressive: the gap between pick 20 and
 # pick 40 is enormous and the gap between 140 and 160 is nearly nothing.
 #
+# ONE CURVE PER POSITION. Backs and quarterbacks are drafted from completely
+# different price ranges and score completely different amounts, so a single
+# pooled fit would be wrong for both -- and wrong in a flattering direction for
+# running backs, who would all come out looking like steals against a curve that
+# quarterbacks dragged down. `fit_expectation_curve` takes a `pos` and filters
+# before fitting. There is no way to accidentally get the pooled version.
+#
 # Two honest caveats, both surfaced in the fit metadata rather than buried:
-#  * Both sides are PER GAME. A QB who got hurt is measured on the games he
+#  * Both sides are PER GAME. A player who got hurt is measured on the games he
 #    played, not punished twice -- availability is already its own factor in the
 #    blend. So read the residual as "per game he plays, is he worth the pick".
-#  * QBs who were drafted and then never played enough to measure are DROPPED
+#  * Players who were drafted and then never played enough to measure are DROPPED
 #    from the fit (`missed` in the metadata counts them). Those are mostly busts,
 #    so the curve sits slightly optimistic at the late picks. Erring that way is
 #    the safe direction: it makes a late-round "value" tag harder to earn.
@@ -143,19 +219,26 @@ MIN_GAMES_HIST = 4      # a 1-2 game cameo is noise, not a season
 
 
 def load_adp_history(path=None) -> pd.DataFrame:
-    """Read data/adp_history.csv -> year, name, adp, key. Empty frame if missing."""
+    """Read data/adp_history.csv -> year, name, adp, pos, key. Empty if missing.
+
+    `pos` is optional in the file, exactly as it is in adp.csv. A file without it
+    is read as all-QB, which is what the historical file contained before running
+    backs existed, so the QB curve refits to the same numbers it always did.
+    """
     p = path or (config.DATA_DIR / HISTORY_FILE)
+    empty = pd.DataFrame(columns=["year", "name", "adp", "pos", "key"])
     try:
         df = pd.read_csv(p)
     except Exception:
-        return pd.DataFrame(columns=["year", "name", "adp", "key"])
+        return empty
     need = {"year", "name", "adp"}
     if not need.issubset(df.columns):
-        return pd.DataFrame(columns=["year", "name", "adp", "key"])
+        return empty
     df["year"] = pd.to_numeric(df["year"], errors="coerce")
     df["adp"] = pd.to_numeric(df["adp"], errors="coerce")
     df = df.dropna(subset=["year", "adp"])
     df["year"] = df["year"].astype(int)
+    df = _with_pos(df)
     df["key"] = df["name"].map(norm)
     return df.reset_index(drop=True)
 
@@ -177,19 +260,33 @@ def _fit_log(picks, ppgs) -> tuple[float, float, float] | None:
     return float(a), float(b), float(r2)
 
 
-def fit_expectation_curve(hist: pd.DataFrame, actual: dict) -> dict:
-    """Fit the historical curve. `actual` is {(year, key): actual_fp_per_game}.
+def fit_expectation_curve(hist: pd.DataFrame, actual: dict,
+                          pos: str | None = DEFAULT_POS) -> dict:
+    """Fit the historical curve FOR ONE POSITION.
+
+    `actual` is {(year, key): actual_fp_per_game}. `pos` filters the history rows
+    before anything is fit -- pass RB and only running backs shape the curve.
 
     Returns {} when there isn't enough overlap to fit something trustworthy, so
     the caller can fall back rather than publish a made-up curve.
     """
     if hist is None or hist.empty or not actual:
         return {}
-    picks, ppgs, missed, yrs = [], [], 0, set()
-    for r in hist.itertuples():
+    sub = for_pos(hist, pos)
+    if sub is None or sub.empty:
+        return {}
+    picks, ppgs, missed, yrs, missed_names = [], [], 0, set(), []
+    for r in sub.itertuples():
         v = actual.get((int(r.year), r.key))
         if v is None:
+            # Two very different things land here and it matters which: a player
+            # who was drafted and then barely played (a bust or an injury), and a
+            # player whose NAME simply failed to match the stats. The first is
+            # expected and harmless. The second silently shrinks the fit and is
+            # invisible unless we say who it was -- so record the names and let
+            # the build script print them.
             missed += 1
+            missed_names.append(f"{int(r.year)} {r.name}")
             continue
         picks.append(float(r.adp))
         ppgs.append(float(v))
@@ -204,7 +301,11 @@ def fit_expectation_curve(hist: pd.DataFrame, actual: dict) -> dict:
         "a": round(a, 4), "b": round(b, 4), "r2": round(r2, 3),
         "n": len(picks), "missed": missed, "seasons": sorted(yrs),
         "lo": round(min(picks), 1), "hi": round(max(picks), 1),
+        "pos": str(pos).upper() if pos else "ALL",
         "source": "history",
+        # Build-time diagnostic only. `ratings.attach` lifts this off the curve
+        # before the curve reaches the page, so it never ships to the browser.
+        "missed_names": missed_names,
     }
 
 
