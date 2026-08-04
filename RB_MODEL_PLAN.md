@@ -353,15 +353,19 @@ publish instead of two. Easy to reverse if you'd rather have separate pages.
 | `scripts\11_build_rb_model.py` | New. The command you run: `py scripts\11_build_rb_model.py` |
 | `.github\workflows\deploy.yml` | Builds and publishes the RB board alongside the QB one |
 
-**On your website.** The RB board goes up at
-`hunterespo17.github.io/nfl-fantasy-models/rb.html`, and a link between the two
-boards appears in the top-right corner of each. The running-back build runs
-*first* and is allowed to fail: it leans on depth charts and snap counts that can
-be thin in the offseason, and a bad day for the backs must never take the QB
-board — the page you actually draft from — off the internet. If it does fail, the
-site still deploys, the QB board loses its "RB board" link for that run rather
-than pointing at a page that isn't there, and the Actions tab shows a warning
-saying so.
+**On your website.** Both boards go up at
+`hunterespo17.github.io/nfl-fantasy-models/` — one page, a tab per position, plus
+a Big Board that ranks every player against replacement and one shared How-it-works
+tab. The running-back build runs *first* and is allowed to fail: it leans on depth
+charts and snap counts that can be thin in the offseason, and a bad day for the
+backs must never take the QB board — the page you actually draft from — off the
+internet. If it does fail, the site still deploys with no RB tab rather than an
+empty one, and the Actions tab shows a warning saying so.
+
+Each position build saves its own finished board into `outputs\boards\`, and
+`scripts\12_build_site.py` folds whatever is in that folder into the one page. That
+split is what makes a failed running-back run harmless: it never touched the
+quarterbacks' saved board.
 
 The decision: rather than copying the 1,100-line quarterback page into a second
 running-back page that would immediately start drifting out of sync, the page
@@ -411,7 +415,7 @@ him have draft capital. That's a judgement call about 32 situations, which is
 exactly the shape of problem `data\playcallers.csv` already solves on the QB side.
 
 So: `data\backfields.csv`, one row per team, with the same discipline — a
-validation script (`scripts\13_check_backfields.py`, mirroring
+validation script (`scripts\14_check_backfields.py`, mirroring
 `scripts\09_check_playcallers.py`) that you run after every edit, and a preflight
 entry so a typo can't ship. About 32 rows to fill in once, then touched only when
 news breaks.
@@ -433,7 +437,7 @@ So we need a second script that asks the real question: run the screen against
 returned +5.0 over expectation — and, just as importantly, how many backs it
 flagged who didn't. A screen that lights up half the board isn't a screen.
 
-That's `scripts\12_backtest_rb.py`, and it's the thing that tells us whether any
+That's `scripts\13_backtest_rb.py`, and it's the thing that tells us whether any
 of this is real.
 
 ---

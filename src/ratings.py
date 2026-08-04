@@ -442,18 +442,25 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
     pranks = adp_mod.platform_pos_ranks(adp_df, pos)
     crank, _cscore = adp_mod.consensus_ranks(adp_df, pranks, pos)
     picks = adp_mod.raw_picks(adp_df, pos)
+    # Only the sites that actually price THIS position. It used to walk the full
+    # PLATFORMS list, which put a key on every player for every site the project
+    # has ever read -- and the board draws one column per key it finds. The RB
+    # file carries FFC only, so that emitted three columns of nothing but dashes
+    # and read as "ADP is broken on this board" when the data was simply absent.
+    # Same list platform_pos_ranks itself ranked, in the same order.
+    plats = adp_mod.has_platforms(adp_mod.for_pos(adp_df, pos))
     for q in payload:
         k = adp_mod.norm(q["name"])
-        # .get(pf, {}) and not pranks[pf]: a platform only appears in pranks when it
-        # actually carries numbers for this position. A file with running-back ADP
-        # from one site and not the others is the normal case, not an error.
+        # .get(pf, {}) and not pranks[pf]: a platform can carry data for the
+        # position and still not rank this particular player.
         q["adp_platforms"] = {pf: pranks.get(pf, {}).get(k)                        # pos# per platform
-                              for pf in adp_mod.PLATFORMS}
-        q["adp_picks"] = picks.get(k, {pf: None for pf in adp_mod.PLATFORMS})       # raw overall pick
+                              for pf in plats}
+        _pk = picks.get(k, {})
+        q["adp_picks"] = {pf: _pk.get(pf) for pf in plats}                          # raw overall pick
         q["adp_pos_rank"] = int(crank[k]) if k in crank else None                   # consensus pos#
         q["adp_label"] = f"{pos}{q['adp_pos_rank']}" if q["adp_pos_rank"] else "UDFA"
         q["value_by_platform"] = {pf: (pranks[pf][k] - q["rank"])                   # +: falls past model
-                                  for pf in adp_mod.PLATFORMS if k in pranks.get(pf, {})}
+                                  for pf in plats if k in pranks.get(pf, {})}
 
     # pool-relative floor & ceiling buckets
     _tertile(payload, "floor_pts", ["Risky", "Moderate", "Safe"], "floor_bucket")

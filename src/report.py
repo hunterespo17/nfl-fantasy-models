@@ -1,63 +1,78 @@
 """
-HTML report for the index-blend models. One template, any position.
+HTML report for the index-blend models. One template, one page, every position.
 
-`render(result, meta)` returns one self-contained HTML string (CSS + JS inlined,
-no storage). It makes three kinds of network request, all optional: team logos
-and player headshots from ESPN's image CDN (each has a text fallback -- team
-abbreviation / initials avatar), and one small request for this page's own URL
-to check whether a newer build has been published (see "freshness check" in the
-script below). With no internet, all three fail quietly and the board renders
-exactly as it did before any of them existed. The page has two tabs:
+`render_site(boards, meta)` returns one self-contained HTML string (CSS + JS
+inlined, no storage) holding EVERY position's board. `render(result, meta)` is
+the one-board call it grew out of and still works: it wraps its argument and
+hands it to render_site, so an old caller gets a page with a single position tab
+on it and nothing else changes.
 
-  How it works  -- explains the model and shows the factor weighting (% of 100).
-  Rankings      -- the board, with LIVE weight sliders: drag a factor's weight
-                   and the projections + ranking recompute in the browser.
+It makes three kinds of network request, all optional: team logos and player
+headshots from ESPN's image CDN (each has a text fallback -- team abbreviation /
+initials avatar), and one small request for this page's own URL to check whether
+a newer build has been published (see "freshness check" in the script below).
+With no internet, all three fail quietly and the board renders exactly as it did
+before any of them existed.
+
+The tab bar is built in the browser from the boards actually present:
+
+  QB Rankings / RB Rankings / ...  -- one per position, in the order given.
+  Big Board                        -- everybody at once, ranked on points over
+                                      replacement, because 17 pts/gm means
+                                      something different at each position.
+  How it works                     -- ONE shared tab. It explains whichever
+                                      position you're looking at and carries its
+                                      own position switcher, rather than each
+                                      board shipping a near-identical copy.
 
 All the math is embedded per player as 0-100 factor indices plus a calibration
-(a, b); the browser computes  pts = a + b * (sum(w*index)/sum(w))  on the fly.
+(a, b, and optional knots); the browser computes the points from the weights
+live, per board, so every board keeps its own sliders and its own scale.
 
 POSITION
 --------
-`meta["pos"]` drives everything position-specific and defaults to "QB", so a
-caller that never heard of this argument gets exactly the old quarterback page.
-Three mechanisms, in order of how much they can break:
+Nothing position-specific is baked into the HTML text any more -- with several
+boards in one file there is no single position to bake. Two mechanisms remain:
 
-  1. __POS__ / __POS_LONG__ / __POS_LOWER__ / __POS_PLURAL__ tokens, swapped in
-     the HTML text below before the data is injected. Static labels only.
-  2. A `POS` constant in the script, used to build "RB12"-style rank strings at
-     runtime. Every one of those used to be a hard-coded "QB" + number.
-  3. `hidden` toggles for whole blocks that only make sense for one position --
-     the archetype chips, and Heath's two-path league-winner screen, which is a
-     claim about quarterbacks and is left off every other board on purpose.
+  1. Per-board values read out of SITE.boards[pos] in the script (POS, POSLONG,
+     POSPL, the calibration, the weights, the platform list...). Everything that
+     used to be a page-level constant is now recomputed by loadBoard().
+  2. `data-pos` attributes on whole blocks that only make sense for one position
+     -- the archetype chips, and Heath's two-path league-winner screen, which is
+     a claim about quarterbacks and is left off every other board on purpose.
+     The show/hide pass re-runs on every board switch.
 
-The payload key is still "qbs" for every position. It is the wrong name now, but
-it is load-bearing in about forty places in the script and renaming it would buy
-nothing a reader of this comment doesn't already know.
+The per-board payload key is still "qbs" for every position. It is the wrong
+name now, but it is load-bearing in about forty places in the script and
+renaming it would buy nothing a reader of this comment doesn't already know.
 """
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
-# Position words for the static labels. Anything not listed falls back to the
-# bare abbreviation, which reads fine everywhere it's used ("Search a K...").
+# Position words for the labels. Anything not listed falls back to the bare
+# abbreviation, which reads fine everywhere it's used ("Search a K...").
 _POS_WORDS = {
     "QB": ("Quarterback", "quarterback", "quarterbacks"),
     "RB": ("Running back", "running back", "running backs"),
     "WR": ("Wide receiver", "wide receiver", "wide receivers"),
     "TE": ("Tight end", "tight end", "tight ends"),
 }
+# The order tabs appear in when the caller doesn't pin one. Draft-board order:
+# the positions you argue about first, first.
+_POS_ORDER = ["QB", "RB", "WR", "TE", "K", "DST"]
 
 
-def render(result: dict, meta: dict) -> str:
+def _board(result: dict, meta: dict) -> tuple[str, dict]:
+    """One position's slice of the page payload."""
     pos = str(meta.get("pos") or "QB").upper().strip() or "QB"
     long, lower, plural = _POS_WORDS.get(pos, (pos, pos, pos + "s"))
-
-    payload = {
+    return pos, {
+        "pos": pos,
+        "long": long, "lower": lower, "plural": plural,
         "meta": meta,
-        # When this file was generated, in UTC. The page prints it in the
-        # viewer's own timezone and uses it to spot a stale cached copy.
-        "built": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "qbs": result.get("payload", []),
         "weights": result.get("weights", {}),
         "groups": result.get("groups", []),
@@ -67,16 +82,94 @@ def render(result: dict, meta: dict) -> str:
         # show what the bars are instead of asking you to trust them.
         "ratings_meta": result.get("ratings_meta", {}),
     }
-    html = (_TEMPLATE
-            .replace("__POS_LONG__", long)
-            .replace("__POS_LOWER__", lower)
-            .replace("__POS_PLURAL__", plural)
-            .replace("__POS__", pos))
-    # Data last: the JSON carries player names and free text, and swapping the
-    # label tokens after it is injected would let a stray token in the data get
-    # rewritten. Nothing in the payload should contain one -- this just makes it
-    # impossible rather than unlikely.
-    return html.replace("__DATA_JSON__", json.dumps(payload))
+
+
+def render_site(boards, meta: dict | None = None) -> str:
+    """One page, every board.
+
+    `boards` is a list of (result, meta) pairs -- the same two arguments the
+    single-board render() takes -- one per position. `meta` is the page's own
+    metadata (title, season label); when it's omitted the first board's meta
+    stands in, which is what makes render() a one-line wrapper.
+    """
+    pairs = [_board(r, m) for r, m in boards]
+    if not pairs:
+        raise ValueError("render_site needs at least one board")
+
+    by_pos = {}
+    for pos, b in pairs:
+        by_pos[pos] = b                      # last one wins on a duplicate
+    # Caller's order is respected; anything it didn't rank falls back to the
+    # standard draft-board order, and anything unheard-of goes on the end.
+    given = [p for p, _ in pairs]
+    order = sorted(dict.fromkeys(given),
+                   key=lambda p: (_POS_ORDER.index(p) if p in _POS_ORDER else 99, p))
+
+    site_meta = dict(meta or pairs[0][1]["meta"])
+    payload = {
+        "meta": site_meta,
+        # When this file was generated, in UTC. The page prints it in the
+        # viewer's own timezone and uses it to spot a stale cached copy.
+        "built": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "order": order,
+        "boards": by_pos,
+    }
+    # Data last, and by a token no player name can contain: the JSON carries
+    # names and free text, and any string replacement run after it is injected
+    # could reach inside the data. There is nothing left to replace afterwards.
+    return _TEMPLATE.replace("__DATA_JSON__", json.dumps(payload))
+
+
+def render(result: dict, meta: dict) -> str:
+    """Back-compat: one position, one page. Same page, one tab on it."""
+    return render_site([(result, meta)], meta)
+
+
+# The parts of a build the page actually reads. A result also carries console
+# material -- skipped rookies, debug frames -- which has no business on disk in
+# a file whose only job is to be re-read by the site builder.
+_BOARD_KEYS = ("payload", "weights", "groups", "calib", "backtest", "ratings_meta")
+
+
+def save_board(result: dict, meta: dict, path) -> Path:
+    """Park one finished board on disk so the combined page can pick it up.
+
+    Each position is built by its own script, and rebuilding one should not
+    force a rebuild of the others -- a running-back run that fails must not be
+    able to take the quarterbacks off the site. So each build saves its own
+    board here, and the site builder assembles the page from whatever it finds.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pos = str(meta.get("pos") or "QB").upper().strip() or "QB"
+    body = {
+        "pos": pos,
+        "meta": meta,
+        "result": {k: result[k] for k in _BOARD_KEYS if k in result},
+        "saved": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    path.write_text(json.dumps(body), encoding="utf-8")
+    return path
+
+
+def load_boards(folder) -> list[tuple[dict, dict]]:
+    """Every saved board in a folder, in the shape render_site() wants.
+
+    A file that is missing, half-written or not a board is skipped rather than
+    raised on: one corrupt file should cost you that position, not the page.
+    """
+    out = []
+    for p in sorted(Path(folder).glob("*.json")):
+        try:
+            body = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(body, dict) and isinstance(body.get("result"), dict) \
+                and body["result"].get("payload"):
+            meta = dict(body.get("meta") or {})
+            meta.setdefault("pos", body.get("pos", "QB"))
+            out.append((body["result"], meta))
+    return out
 
 
 _TEMPLATE = r"""<!DOCTYPE html>
@@ -92,7 +185,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate, max-age=0">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>NFL __POS__ Projection Model</title>
+<title>NFL Fantasy Projection Models</title>
 <style>
   :root{
     --surface-1:#fcfcfb;--plane:#f5f6f9;--ink:#0b0b0b;--ink-2:#52514e;--muted:#898781;
@@ -379,32 +472,75 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .fbody{padding:3px 0 14px}
   .note{color:var(--muted);font-size:12.5px;margin-top:14px}
   .pill{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;margin-left:8px;background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.28);letter-spacing:.02em;vertical-align:middle}
+
+  /* --- segmented position switcher -------------------------------------
+     Used twice: to pick which model "How it works" is describing, and to
+     filter the big board down to one position. Same control, so the two
+     read as the same idea. */
+  .seg{display:inline-flex;gap:2px;padding:3px;border-radius:11px;background:var(--plane);
+    border:1px solid var(--border)}
+  .seg button{appearance:none;border:0;background:transparent;color:var(--ink-2);cursor:pointer;
+    font:inherit;font-size:12px;font-weight:700;letter-spacing:.02em;padding:5px 13px;
+    border-radius:8px;transition:background .12s,color .12s}
+  .seg button:hover{color:var(--ink)}
+  .seg button[aria-pressed="true"],.seg button[aria-selected="true"]{
+    background:var(--accent);color:#fff}
+  .ovpick{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 18px}
+  .ovpick .note{margin:0}
+
+  /* --- big board -------------------------------------------------------- */
+  /* The position chip is the big board's whole orientation: without it every
+     row is just a name, and which scarcity you're buying is the question the
+     board exists to answer. Coloured per position so a run of one shows up as
+     a block of colour rather than something you have to read for. */
+  .pc{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.06em;padding:2px 7px;
+    border-radius:6px;color:#fff;margin-right:8px;min-width:26px;text-align:center;vertical-align:1px}
+  .pc.QB{background:#184f95}.pc.RB{background:#0f6b46}.pc.WR{background:#8a4b12}
+  .pc.TE{background:#6b2f8a}.pc.K,.pc.DST{background:#52514e}
+  #bigtbl .vor{font-variant-numeric:tabular-nums;font-weight:700}
+  #bigtbl .vor.neg{color:var(--muted);font-weight:400}
+  #bigtbl td.rd{color:var(--muted);font-size:12px;white-space:nowrap}
+  /* Round dividers. On a cross-position board the useful unit isn't the tier,
+     it's "am I still in round 3" -- so the rounds get ruled off. */
+  tr.rdsep td{background:var(--plane);color:var(--ink-2);font-size:11.5px;font-weight:700;
+    letter-spacing:.06em;text-transform:uppercase;padding:7px 12px;border-top:1px solid var(--baseline)}
+  /* Long-standing gap: .mut was already being written into cells for "there is
+     no number here" and had no rule, so a dash meant to recede read as data. */
+  .mut{color:var(--muted)}
   @media(max-width:640px){.wname{width:auto}}
 </style>
 </head>
 <body>
 <header>
   <div class="hgrid">
-    <div><h1>NFL __POS__ Projection Model <span class="pill" id="seasonPill"></span></h1>
+    <div><h1 id="pageTitle">NFL Projection Models <span class="pill" id="seasonPill"></span></h1>
       <div class="sub" id="subline"></div></div>
     <div class="spacer"></div>
-    <!-- Link to the other position's board. Hidden unless meta.sibling is set,
-         which only the deploy workflow does -- a locally-built board sits in
-         outputs\ under a different filename than the published site uses, so a
-         link rendered there would always 404. Better no link than a dead one. -->
-    <a class="toggle" id="siblingLink" href="#" hidden></a>
+    <!-- There used to be a cross-link here to the other position's board, back
+         when each position was its own file. They're tabs in this one now, so
+         the link has nowhere to point. meta.sibling is ignored on purpose --
+         a build script still setting it does no harm. -->
     <button class="toggle" id="themeBtn" type="button">◑ Theme</button>
   </div>
-  <!-- Rankings first and open by default: the board is what you came for on
-       draft day. "How it works" is reference material you read once. -->
-  <div class="hgrid"><div class="tabs" role="tablist">
-    <button class="tab" role="tab" data-tab="rankings" aria-selected="true">__POS__ Rankings</button>
-    <button class="tab" role="tab" data-tab="overview" aria-selected="false">How it works</button>
-  </div></div>
+  <!-- Built in the browser from the boards this file actually carries: one tab
+       per position, then the combined Big Board, then a single "How it works".
+       Rankings first and open by default -- the board is what you came for on
+       draft day; "How it works" is reference material you read once. -->
+  <div class="hgrid"><div class="tabs" role="tablist" id="tabs"></div></div>
 </header>
 
 <div class="wrap">
   <section id="overview">
+    <!-- One "How it works" for the whole site. Each board's copy is written into
+         the same cards behind data-pos attributes and only one set is ever
+         visible, so this switcher is what turns two near-identical explainer
+         tabs into one. It moves the active board too, so coming back out of
+         here lands you on the position you were just reading about. -->
+    <div class="card ovpick" id="ovpickCard">
+      <span class="note" style="margin:0">Reading the</span>
+      <div class="seg" id="ovpos" role="tablist"></div>
+      <span class="note" style="margin:0">model.</span>
+    </div>
     <div class="card">
       <h2>What this model does</h2>
       <p data-pos="QB">It projects each quarterback's <strong>fantasy points</strong> as a transparent blend of factors —
@@ -600,7 +736,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
             <option value="pc">— via McShanahan play-caller</option>
             <option value="miss">Misses both paths</option>
           </select></label>
-        <input class="search" id="search" type="search" placeholder="Search a __POS__…" aria-label="Search">
+        <input class="search" id="search" type="search" placeholder="Search…" aria-label="Search">
         <span class="note" style="margin:0">Click a row for the full breakdown.</span>
       </div>
       <p class="note lwcount" id="lwcount" style="margin-top:10px"></p>
@@ -609,6 +745,35 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <div class="tblwrap"><table id="tbl"><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
     </div>
     <p class="note" id="rnote"></p>
+  </section>
+
+  <!-- The combined board. Everyone from every position in one ranking. -->
+  <section id="big">
+    <div class="card">
+      <h2>One board, every position</h2>
+      <p>Ranked on <strong>points over replacement</strong> — how much a player beats the
+      best guy you could have had for nothing at his own position. That comparison, and not
+      raw points, is what makes positions comparable: 17 points a game is a middling
+      quarterback and a top-three running back, so ranking on the projection alone would
+      hand you the first eight rounds of quarterbacks.</p>
+      <p class="note" id="bigrepl" style="margin-top:10px"></p>
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label class="note" style="margin:0">Sort&nbsp;
+          <select class="sortsel" id="bigsort">
+            <option value="vor">Value over replacement</option>
+            <option value="proj">Raw projection</option>
+            <option value="adp">Where the market takes him</option>
+            <option value="edge">Biggest gap vs the market</option>
+          </select></label>
+        <div class="seg" id="bigpos" role="group"></div>
+        <input class="search" id="bigsearch" type="search" placeholder="Search…" aria-label="Search the big board">
+        <span class="note" style="margin:0">Click a row to open him on his own board.</span>
+      </div>
+    </div>
+    <div class="card" style="padding:14px 16px">
+      <div class="tblwrap"><table id="bigtbl"><thead id="bighead"></thead><tbody id="bigbody"></tbody></table></div>
+    </div>
+    <p class="note" id="bignote"></p>
   </section>
 </div>
 
@@ -619,35 +784,36 @@ _TEMPLATE = r"""<!DOCTYPE html>
 </div>
 
 <script>
-const DATA = __DATA_JSON__;
+/* SITE holds every board; DATA is whichever one you're looking at. Splitting it
+   that way is what let several positions move into one file without touching the
+   forty-odd places below that read DATA.qbs -- they still read "the board", it
+   just isn't the only one in the room any more. Everything derived from DATA is
+   `let` and gets recomputed by loadBoard(), because a page-level constant is
+   exactly the thing that goes quietly stale when the board underneath it
+   changes. */
+const SITE = __DATA_JSON__;
 const $=s=>document.querySelector(s);
 const fmt=(n,d=1)=>(n==null||isNaN(n))?"–":Number(n).toFixed(d);
-const GROUPS=DATA.groups.length?DATA.groups:Object.keys(DATA.weights);
-const A=DATA.calib.a, B=DATA.calib.b, KN=(DATA.calib.knots||[]);
-let weights=Object.assign({}, DATA.weights);
+const ORDER=(SITE.order&&SITE.order.length)?SITE.order.slice():Object.keys(SITE.boards||{});
+const POSPL_MAP={QB:"QBs",RB:"RBs",WR:"WRs",TE:"TEs"};
 
 /* Which position this board is. Everywhere below that used to write a literal
-   "QB" in front of a rank number now writes POS, so an RB board says RB12 and
-   not QB12. Defaults to QB, so an older meta with no `pos` key renders exactly
-   the page it always did. */
-const POS=String((DATA.meta&&DATA.meta.pos)||"QB").toUpperCase();
-const POSLONG={QB:"Quarterback",RB:"Running back",WR:"Wide receiver",TE:"Tight end"}[POS]||POS;
-const POSPL={QB:"QBs",RB:"RBs",WR:"WRs",TE:"TEs"}[POS]||(POS+"s");
+   "QB" in front of a rank number writes POS, so an RB board says RB12 and not
+   QB12. */
+let POS=ORDER[0]||"QB";
+let DATA=SITE.boards[POS];
+let POSLONG=POS, POSPL=POS+"s";
+let GROUPS=[], A=0, B=0.25, KN=[];
+let weights={};
 
-/* Show the blocks written for this position and hide the rest. One pass over the
-   whole document, so a block added later only needs the attribute. */
-document.querySelectorAll("[data-pos]").forEach(el=>{el.hidden = el.dataset.pos!==POS;});
-
-$("#seasonPill").textContent=DATA.meta.season_label||"";
-$("#subline").textContent=DATA.meta.subline||"";
-$("#rnote").textContent=DATA.meta.note||"";
-
-/* Cross-board link. Only the published site sets meta.sibling; a board built on
-   your own machine has no companion file to point at, so the link stays hidden.
-   textContent, not innerHTML -- the label comes from meta and is never trusted. */
-(function(){const s=DATA.meta&&DATA.meta.sibling,a=$("#siblingLink");
-  if(!s||!s.href||!a)return;
-  a.setAttribute("href",s.href);a.textContent=s.label||"Other board";a.hidden=false;})();
+/* One set of slider weights per board, kept for the life of the page. Tuning the
+   QB board, flipping to the RB board and flipping back used to hand you the
+   defaults again -- which on a draft-day page is the same as losing the work. */
+const WSTATE={};
+function weightsFor(pos){
+  if(!WSTATE[pos])WSTATE[pos]=Object.assign({},SITE.boards[pos].weights);
+  return WSTATE[pos];
+}
 
 /* --- build stamp + freshness check ---------------------------------------
    Two problems, one answer.
@@ -670,15 +836,18 @@ $("#rnote").textContent=DATA.meta.note||"";
 
    Every step is guarded. Offline, opened from disk (file://), or a failed
    request all end with no chip and no error in the console. */
-const BUILT = DATA.built || "";
+const BUILT = SITE.built || "";
 
+/* Worked out once and then pasted onto whichever board's subline is showing.
+   It used to append itself to the subline on load, which with several boards
+   sharing that line would have wiped the stamp the first time you switched. */
+let BUILT_LABEL="", BUILT_TITLE="";
 (function stampBuildTime(){
   const d = BUILT ? new Date(BUILT) : null;
   if(!d || isNaN(d)) return;
-  const sub = $("#subline");
-  sub.textContent = (sub.textContent ? sub.textContent + " · " : "") + "built " +
+  BUILT_LABEL = "built " +
     d.toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
-  sub.title = "This page was generated " + d.toLocaleString();
+  BUILT_TITLE = "This page was generated " + d.toLocaleString();
 })();
 
 function freshCheck(){
@@ -701,16 +870,42 @@ function freshCheck(){
     .catch(()=>{});
 }
 setTimeout(freshCheck, 1200);
-if(DATA.backtest && DATA.backtest.model_mae!=null){
-  $("#btstat").innerHTML=`<div class="stat"><b>${fmt(DATA.backtest.model_mae,2)}</b><span>model error (MAE, pts/gm)</span></div>`+
-    `<div class="stat"><b>${fmt(DATA.backtest.baseline_mae,2)}</b><span>last-year-repeats baseline</span></div>`+
-    `<div class="note">Backtested on ${(DATA.backtest.seasons||[]).join(" & ")} — lower is better.</div>`;
+function backtestStat(){
+  const bt=DATA.backtest;
+  $("#btstat").innerHTML=(bt&&bt.model_mae!=null)
+    ?`<div class="stat"><b>${fmt(bt.model_mae,2)}</b><span>model error (MAE, pts/gm)</span></div>`+
+     `<div class="stat"><b>${fmt(bt.baseline_mae,2)}</b><span>last-year-repeats baseline</span></div>`+
+     `<div class="note">Backtested on ${(bt.seasons||[]).join(" & ")} — lower is better.</div>`
+    :"";
 }
 
-document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{
-  document.querySelectorAll(".tab").forEach(x=>x.setAttribute("aria-selected",x===t));
-  document.querySelectorAll("section").forEach(s=>s.classList.toggle("active",s.id===t.dataset.tab));
-});
+/* --- tabs ----------------------------------------------------------------
+   A tab is one of three things: a position (swap the board underneath the
+   rankings section), the combined board, or the shared explainer. The position
+   tabs all point at the SAME section -- there is one rankings table on the page
+   and loadBoard() refills it -- which is why the panel is tracked separately
+   from the board. */
+let activeTab="rankings";
+function buildTabs(){
+  const t=$("#tabs");
+  t.innerHTML=ORDER.map(p=>
+      `<button class="tab" role="tab" data-tab="rankings" data-board="${p}">${p} Rankings</button>`).join("")+
+    (ORDER.length>1
+      ? `<button class="tab" role="tab" data-tab="big" title="Every position in one ranking, on points over replacement">Big Board</button>`
+      : "")+
+    `<button class="tab" role="tab" data-tab="overview">How it works</button>`;
+  t.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
+    if(b.dataset.board&&b.dataset.board!==POS)loadBoard(b.dataset.board);
+    showTab(b.dataset.tab);
+  });
+}
+function showTab(name){
+  activeTab=name;
+  document.querySelectorAll("#tabs .tab").forEach(b=>b.setAttribute("aria-selected",
+    String(b.dataset.tab===name && (!b.dataset.board || b.dataset.board===POS))));
+  document.querySelectorAll(".wrap>section").forEach(s=>s.classList.toggle("active",s.id===name));
+  if(name==="big")bigRefresh();
+}
 const root=document.documentElement;
 $("#themeBtn").onclick=()=>{const c=root.getAttribute("data-theme");
   root.setAttribute("data-theme",c==="auto"?"light":c==="light"?"dark":"auto");
@@ -723,23 +918,47 @@ function composite(q){const s=sumW();return GROUPS.reduce((a,g)=>a+(weights[g]||
    bends. Past either end it keeps going at that end's slope rather than
    flattening off, so an unusually high or low score still moves the number.
    This has to stay identical to apply() in src/calibration.py -- there is a
-   test that projects the same board both ways and compares. */
-function ptsAt(c){
-  const n=KN.length;
-  if(n<2) return Math.max(0, A + B*c);
-  if(c<=KN[0][0]){const s=(KN[1][1]-KN[0][1])/(KN[1][0]-KN[0][0]);
-                  return Math.max(0, KN[0][1]+s*(c-KN[0][0]));}
-  if(c>=KN[n-1][0]){const s=(KN[n-1][1]-KN[n-2][1])/(KN[n-1][0]-KN[n-2][0]);
-                    return Math.max(0, KN[n-1][1]+s*(c-KN[n-1][0]));}
-  let i=1; while(i<n-1 && KN[i][0]<c) i++;
-  const x0=KN[i-1][0], y0=KN[i-1][1], x1=KN[i][0], y1=KN[i][1];
+   test that projects the same board both ways and compares.
+
+   Takes its scale as arguments rather than reading the page globals, because the
+   Big Board has to price a quarterback and a running back in the same pass and
+   each position was fitted its own bend. ptsAt() below is this function pointed
+   at whichever board you're looking at. */
+function ptsAtK(c,kn,a,b){
+  const n=kn.length;
+  if(n<2) return Math.max(0, a + b*c);
+  if(c<=kn[0][0]){const s=(kn[1][1]-kn[0][1])/(kn[1][0]-kn[0][0]);
+                  return Math.max(0, kn[0][1]+s*(c-kn[0][0]));}
+  if(c>=kn[n-1][0]){const s=(kn[n-1][1]-kn[n-2][1])/(kn[n-1][0]-kn[n-2][0]);
+                    return Math.max(0, kn[n-1][1]+s*(c-kn[n-1][0]));}
+  let i=1; while(i<n-1 && kn[i][0]<c) i++;
+  const x0=kn[i-1][0], y0=kn[i-1][1], x1=kn[i][0], y1=kn[i][1];
   return Math.max(0, y0+(y1-y0)*(c-x0)/(x1-x0));
 }
+function ptsAt(c){return ptsAtK(c,KN,A,B);}
 /* Points per index point right where this player sits. On a bent scale that
    changes along the board, so the contribution bars read the local one instead
    of one slope for everybody. */
 function slopeAt(c){return (ptsAt(c+0.5)-ptsAt(c-0.5));}
 function projOf(q){return ptsAt(composite(q));}
+
+/* --- pricing a player on a board that isn't the one on screen -------------
+   Same arithmetic as composite()/projOf(), with the board handed in instead of
+   read off the page. The Big Board needs it: every position keeps its own
+   weights, its own factor list and its own scale, and all of them have to be
+   priced at once. Slider positions are honoured -- ctxFor reads the same
+   per-board weights the sliders write to, so tuning the RB board moves the
+   backs on the combined board too. */
+function ctxFor(pos){
+  const bd=SITE.boards[pos]||{}, cal=bd.calib||{a:0,b:0.25};
+  const gs=(bd.groups&&bd.groups.length)?bd.groups:Object.keys(bd.weights||{});
+  return {pos, bd, w:weightsFor(pos), gs, a:cal.a??0, b:cal.b??0.25, kn:cal.knots||[]};
+}
+function projIn(x,ctx){
+  const s=ctx.gs.reduce((t,g)=>t+(ctx.w[g]||0),0)||1;
+  const c=ctx.gs.reduce((t,g)=>t+(ctx.w[g]||0)*(x.indices[g]??50),0)/s;
+  return ptsAtK(c,ctx.kn,ctx.a,ctx.b);
+}
 
 function weightBars(){
   const s=sumW();
@@ -769,11 +988,15 @@ function syncSliderLabels(){const s=sumW();
    12-team 1-QB league, RB30 in the same league once you count two starters plus
    half the flex spots -- so the index is one less. The 11 is only a fallback for
    a board built before ratings started publishing it. */
-const REPL=Math.max(0,(DATA.ratings_meta&&DATA.ratings_meta.repl_rank||12)-1);
+let REPL=11;
 /* League size comes from the config now. It used to be REPL+1, which is right for
    quarterbacks by coincidence and badly wrong for every other position. */
-const TEAMS=(DATA.ratings_meta&&DATA.ratings_meta.teams)||12;
-const RD10=TEAMS*10;   // pick 120: the last pick of Round 10, which is where Heath's screen starts
+let TEAMS=12;
+let RD10=120;   // pick 120: the last pick of Round 10, which is where Heath's screen starts
+function replIndex(pos){   // 0-based index of the first unstartable player
+  const rm=(SITE.boards[pos]||{}).ratings_meta||{};
+  return Math.max(0,(rm.repl_rank||12)-1);
+}
 function tiers(sorted){ // gap-based on proj
   const v=sorted.map(q=>q._p); if(v.length<2){sorted.forEach(q=>q._tier=1);return;}
   const d=[];for(let i=1;i<v.length;i++)d.push(v[i-1]-v[i]);
@@ -788,20 +1011,36 @@ const CCLS={High:"g",Medium:"a",Low:"r"};
 const RCLS={Low:"g",Moderate:"a",High:"r"};
 function bdg(t,cls){return t?`<span class="bdg ${cls||'n'}">${t}</span>`:'<span class="bdg n">–</span>';}
 const PLABEL={sleeper:"Sleeper",underdog:"Underdog",espn:"ESPN",ffc:"FFC",yahoo:"Yahoo",cbs:"CBS"};
-const PLATS=(DATA.qbs.length&&DATA.qbs[0].adp_platforms)?Object.keys(DATA.qbs[0].adp_platforms):[];
-// "Market" = re-ranked average of Underdog (best-ball) + FFC (season-long) QB ranks.
+/* The sites behind the Market column, in words. The page used to write
+   "Underdog + FFC" into a dozen captions and tooltips, which is true on the
+   quarterback board and a lie on any board where one of the two carries no
+   prices -- and there is now more than one board. */
+function mktWords(){return MKT_SRC.map(p=>PLABEL[p]||p).join(" and ")||"no site";}
+/* Which sites price THIS position. src/ratings.py only emits a slot for a site
+   that actually carries numbers for the position, so a running-back file with
+   FFC prices and nothing else draws one ADP column and not four, three of them
+   full of dashes. */
+let PLATS=[];
+// "Market" = re-ranked average of Underdog (best-ball) + FFC (season-long) ranks.
 // A neutral reference spanning both draft formats. Sleeper/ESPN are the platforms you
 // draft on and check AGAINST this market; the market itself is built only from UD+FFC.
-const MKT_SRC=["underdog","ffc"].filter(p=>PLATS.includes(p));
-const NCOL=8+PLATS.length+(MKT_SRC.length?1:0);   // +1 for the Market column
+let MKT_SRC=[];
+/* With only ONE market source the Market column is a re-rank of that one site --
+   the same numbers twice, side by side, and a "vs market" row that can only ever
+   say "in line". So the column is drawn when there's something to blend and the
+   site column speaks for itself when there isn't. _market is still computed
+   either way: value, sorting and the comp cards all price against it. */
+let SHOW_MKT=false;
+let NCOL=10;
 let draftPlatform="consensus";
-(function(){
+function computeMarket(){
+  DATA.qbs.forEach(x=>{x._mktScore=null;x._market=null;});
   const scored=DATA.qbs.map(x=>{
     const rs=MKT_SRC.map(p=>x.adp_platforms&&x.adp_platforms[p]).filter(v=>v!=null);
     x._mktScore=rs.length?rs.reduce((a,b)=>a+b,0)/rs.length:null; return x;
   }).filter(x=>x._mktScore!=null).sort((a,b)=>a._mktScore-b._mktScore);
-  scored.forEach((x,i)=>{x._market=i+1;});   // clean market QB# 1..N
-})();
+  scored.forEach((x,i)=>{x._market=i+1;});   // clean market pos# 1..N
+}
 /* How one site prices a QB against the Market column (Underdog + FFC).
    gap = market − site.  NEGATIVE: the site lets him fall LATER than the market,
    so he's cheaper there — a value. POSITIVE: the site drafts him EARLIER, so
@@ -854,15 +1093,15 @@ const FLAGCLS={up:"g",down:"r",warn:"a"};
    projection minus that, so it has to be computed here: dragging a weight
    slider changes the projection, and a number baked in at build time would
    quietly go stale the moment you touched the board. */
-const RMETA=DATA.ratings_meta||{};
-const LWB=RMETA.lw_bars||{fpg:5,value_fpg:2,att_floor:55,att_high:100,rush_fpg:5};
-const CURVE=RMETA.curve||null;
+let RMETA={};
+let LWB={fpg:5,value_fpg:2,att_floor:55,att_high:100,rush_fpg:5};
+let CURVE=null;
 /* The two "big game" bars the boom rates were measured against. They are position
    thresholds, not percentiles: 25 and 30 for a quarterback, 20 and 25 for a back,
    because a 25-point game means something different at each spot. The page used to
    print "25+" and "30+" as literal text, which would have mislabelled every number
    in the RB ceiling column. */
-const BOOM=RMETA.boom||[25,30];
+let BOOM=[25,30];
 /* The short label under a player's name. On the quarterback board that's his
    archetype ("Konami", "Pocket Passer"), which is the single most useful thing
    you can say about a QB in two words. Running backs have no archetype bucket in
@@ -948,7 +1187,7 @@ function lwChecklist(o){
     `<div class="lwcap">${cap} These are fixed published thresholds, not percentiles —
       a whole weak field can miss every one of them, which is the point.</div>`;
 }
-const PF=PLATS.map(p=>[p,PLABEL[p]||p]);
+let PF=[];
 /* The draft-slot block, as one small table: a row per way of quoting the price,
    a column per site, and Market last and bold because it's the number the site
    columns roll up into. Cells carry the same green/red as the board. Every row
@@ -956,8 +1195,8 @@ const PF=PLATS.map(p=>[p,PLABEL[p]||p]);
 function adpTable(o){
   const sel=k=>k===draftPlatform?" selcol":"";
   const head=PF.map(([k,lab])=>`<th class="${sel(k).trim()}">${lab}</th>`).join("")+
-    (MKT_SRC.length?`<th class="mk" title="Market = Underdog (best-ball) and FFC (season-long) blended, then re-ranked">Market</th>`:"");
-  const mkCell=(inner,cls)=>MKT_SRC.length?`<td class="mk ${cls||""}">${inner}</td>`:"";
+    (SHOW_MKT?`<th class="mk" title="Market = ${mktWords()} blended, then re-ranked">Market</th>`:"");
+  const mkCell=(inner,cls)=>SHOW_MKT?`<td class="mk ${cls||""}">${inner}</td>`:"";
 
   const rank=`<tr><th class="rh">Drafted at</th>`+
     PF.map(([k])=>{const e=mktEdge(o,k);
@@ -972,7 +1211,7 @@ function adpTable(o){
       mkCell("—","e")+`</tr>`
     :"";
 
-  const vsMkt=(MKT_SRC.length&&o._market)
+  const vsMkt=(SHOW_MKT&&o._market)
     ?`<tr><th class="rh" title="Two ${POS} spots either way is the cutoff">vs market</th>`+
       PF.map(([k])=>{const e=mktEdge(o,k);
         if(e.gap==null)return '<td class="e">—</td>';
@@ -993,12 +1232,19 @@ function adpTable(o){
       mkCell("—","e")+`</tr>`
     :"";
 
+  const cap=SHOW_MKT
+    ? `Market blends ${mktWords()} — one neutral price spanning best-ball and season-long.
+       <b style="color:var(--good)">Green</b> means that site lets him fall <b>later</b> than the
+       market, so he's cheaper there; <b style="color:var(--neg)">red</b> means it drafts him
+       <b>earlier</b> and you'd be paying up.`
+    : MKT_SRC.length
+      ? `${mktWords()} is the only site in this file pricing ${POSPL}, so it <i>is</i> the market —
+         there is nothing to blend it against and a second column would repeat it. Add another
+         site's ${POS} ADP and the comparison columns come back on their own.`
+      : `No site in this file prices ${POSPL}, so there is no draft cost to score him against.`;
   return `<table class="adpt"><thead><tr><th class="rh"></th>${head}</tr></thead>
       <tbody>${rank}${pick}${vsMkt}${vsMod}</tbody></table>
-    <div class="adpcap">Market blends Underdog and FFC — one neutral price spanning best-ball and
-      season-long. <b style="color:var(--good)">Green</b> means that site lets him fall <b>later</b>
-      than the market, so he's cheaper there; <b style="color:var(--neg)">red</b> means it drafts him
-      <b>earlier</b> and you'd be paying up.</div>`;
+    <div class="adpcap">${cap}</div>`;
 }
 function riskWhy(o){
   if(!o.adp_pos_rank)return "undrafted — no cost, no risk";
@@ -1074,23 +1320,26 @@ function lwMatch(x){
     default:     return true;
   }
 }
-const LWNOTE={
+/* Functions, not constants. Round 10 is TEAMS×10 picks in, and the league size
+   is read off the board -- so a fixed string written once at load would keep
+   quoting the first board's league size after you switched boards. */
+function lwNote(m){return {
   late:`clear one of the two paths and go after pick ${RD10} — Round 10 in a ${TEAMS}-team league, which is the range Heath's finding is stated for`,
   any:"clear one of the two paths, at any draft cost",
   rush:"clear the rushing path (100+ carry pace)",
   pc:"play for a McShanahan-tree play-caller",
   miss:"were measured on both paths and cleared neither",
-};
+}[m]||"";}
 /* What the QBs BELOW the line have in common — the negation of the mode, spelled out
    rather than left as "the others". On a board where nothing is removed, the line is
    the only thing telling you which half you're reading. */
-const LWSEP={
+function lwSep(m){return {
   late:`Below the line — go inside pick ${RD10}, clear neither path, or aren't priced`,
   any:"Below the line — clear neither path, or aren't measured on both",
   rush:"Below the line — not on a 100+ carry pace",
   pc:"Below the line — not a McShanahan-tree play-caller",
   miss:"Below the line — clear at least one path, or aren't measured on both",
-};
+}[m]||"";}
 
 /* --- images -------------------------------------------------------------
    Logos and headshots come from ESPN's image CDN. Nothing here is load-bearing:
@@ -1288,7 +1537,7 @@ function refresh(){
   if(lwMode!=="all")rows.sort((a,b)=>(b._lw?1:0)-(a._lw?1:0));
   const nlw=rows.filter(x=>x._lw).length;
   $("#lwcount").innerHTML=lwMode==="all"?"":
-    `<b>${nlw}</b> of ${rows.length} ${LWNOTE[lwMode]}. The rest stay on the board, dimmed.`;
+    `<b>${nlw}</b> of ${rows.length} ${lwNote(lwMode)}. The rest stay on the board, dimmed.`;
   tiers(all);
   const maxP=Math.max(...DATA.qbs.map(x=>x._p),1);
   // Which panels are open right now. The tbody is rebuilt from scratch on every
@@ -1306,14 +1555,14 @@ function refresh(){
     // The divider is its own row, deliberately without class "row" — that selector is
     // what binds the click-to-open handler below, so a separator can never be clicked
     // open into a panel it has no QB for.
-    return (edge?`<tr class="lwsep"><td colspan="${NCOL}">${LWSEP[lwMode]}</td></tr>`:"")+
+    return (edge?`<tr class="lwsep"><td colspan="${NCOL}">${lwSep(lwMode)}</td></tr>`:"")+
       `<tr class="row${isOpen?" open":""}${dim?" dim":""}${edge?" edge":""}" data-id="${x.rank}">
       <td class="rank num">${rank}</td>
       <td class="qb"><b>${x.name}</b>${teamCell(x.team)}
         <span class="archtag">${styleLabel(x)}</span>${x.mover?'<span class="move">NEW</span>':''}${valueTag(x)}</td>
       <td class="num"><span class="bartrack"><span class="bar" style="width:${w}px"></span></span>${fmt(x._p)}</td>
       ${PLATS.map(p=>`<td class="num pf">${pfRank(x,p)}</td>`).join("")}
-      ${MKT_SRC.length?`<td class="num mkt">${x._market?(POS+x._market):'<span style="color:var(--muted)">—</span>'}</td>`:""}
+      ${SHOW_MKT?`<td class="num mkt">${x._market?(POS+x._market):'<span style="color:var(--muted)">—</span>'}</td>`:""}
       <td>${bdg(x.floor_bucket,FCLS[x.floor_bucket])}</td>
       <td>${bdg(x.ceiling_bucket,CCLS[x.ceiling_bucket])}</td>
       <td>${bdg(x.risk_bucket,RCLS[x.risk_bucket])}</td>
@@ -1339,21 +1588,233 @@ function refresh(){
 
 function header(){
   const pf=PLATS.map(p=>`<th class="num${p===draftPlatform?" selcol":""}" title="${PLABEL[p]||p} ADP, as a ${POS} rank — green where he falls later than the market, red where he goes earlier">${PLABEL[p]||p}</th>`).join("");
-  const mkt=MKT_SRC.length?`<th class="num mkt" title="Market = average of Underdog (best-ball) + FFC (season-long) ${POS} ranks. The site columns are scored against this.">Market</th>`:"";
+  const mkt=SHOW_MKT?`<th class="num mkt" title="Market = average of ${mktWords()} ${POS} ranks, re-ranked 1..N. The site columns are scored against this.">Market</th>`:"";
   $("#thead").innerHTML=`<tr><th class="num">#</th><th>${POSLONG}</th><th class="num">Proj</th>${pf}${mkt}`+
     `<th>Floor</th><th>Ceiling</th><th>Risk</th><th>Why</th><th></th></tr>`;
 }
 $("#search").oninput=refresh;
 $("#sortsel").onchange=e=>{sortMode=e.target.value;refresh();};
 $("#lwsel").onchange=e=>{lwMode=e.target.value;refresh();};
-// inject one "<Platform> ADP" sort option per platform, before the Floor option
-(function(){const anchor=[...$("#sortsel").options].find(o=>o.value==="floor");
-  PLATS.forEach(p=>{const o=document.createElement("option");o.value=p;o.textContent=(PLABEL[p]||p)+" ADP";
-    $("#sortsel").insertBefore(o,anchor);});})();
-$("#platsel").innerHTML='<option value="consensus">Consensus</option>'+PLATS.map(p=>`<option value="${p}">${PLABEL[p]||p}</option>`).join("");
 $("#platsel").onchange=e=>{draftPlatform=e.target.value;header();refresh();};
-$("#reset").onclick=()=>{weights=Object.assign({},DATA.weights);sliders();refresh();};
-header(); sliders(); weightBars(); refresh();
+$("#reset").onclick=()=>{Object.assign(weights,DATA.weights);sliders();refresh();};
+
+/* --- switching boards -----------------------------------------------------
+   Everything the page derives from a board gets rebuilt here, in one place, in
+   dependency order: identity, then the scale, then the ADP columns, then the
+   controls, then the table. The rule that makes this safe to extend is that
+   nothing outside this function may cache a value read off DATA -- if you find
+   yourself writing `const something = DATA.…` at the top level, it belongs in
+   here as a `let` instead.
+
+   The one thing deliberately NOT reset is the weights. Those live in WSTATE,
+   one set per position, so tuning the RB board, checking a quarterback and
+   coming back hands you your board and not the factory defaults. */
+function loadBoard(pos){
+  if(!SITE.boards[pos])return;
+  POS=pos; DATA=SITE.boards[pos];
+  POSLONG=DATA.long||POS; POSPL=DATA.plural||POSPL_MAP[POS]||(POS+"s");
+  GROUPS=(DATA.groups&&DATA.groups.length)?DATA.groups:Object.keys(DATA.weights||{});
+  const cal=DATA.calib||{a:0,b:0.25};
+  A=cal.a??0; B=cal.b??0.25; KN=cal.knots||[];
+  weights=weightsFor(pos);
+
+  RMETA=DATA.ratings_meta||{};
+  LWB=RMETA.lw_bars||{fpg:5,value_fpg:2,att_floor:55,att_high:100,rush_fpg:5};
+  CURVE=RMETA.curve||null;
+  BOOM=RMETA.boom||[25,30];
+  REPL=replIndex(pos);
+  TEAMS=RMETA.teams||12;
+  RD10=TEAMS*10;
+
+  // The ADP columns come and go with the data, so the count is worked out here
+  // rather than written down: 8 fixed columns, one per site, plus Market if it's
+  // being drawn. It's the colspan the detail row opens across.
+  PLATS=(DATA.qbs.length&&DATA.qbs[0].adp_platforms)?Object.keys(DATA.qbs[0].adp_platforms):[];
+  MKT_SRC=["underdog","ffc"].filter(p=>PLATS.includes(p));
+  SHOW_MKT=MKT_SRC.length>1;
+  NCOL=8+PLATS.length+(SHOW_MKT?1:0);
+  PF=PLATS.map(p=>[p,PLABEL[p]||p]);
+  computeMarket();
+
+  // Controls that describe the board reset with it: "Drafting on Sleeper" is
+  // meaningless on a board Sleeper doesn't price, and Heath's screen is a claim
+  // about quarterbacks, so every other board comes back to All.
+  draftPlatform="consensus"; sortMode="proj"; lwMode="all";
+  $("#search").value=""; $("#lwcount").innerHTML="";
+  rebuildSelects();
+  applyPosGates();
+
+  $("#seasonPill").textContent=(DATA.meta&&DATA.meta.season_label)||"";
+  const sub=[(DATA.meta&&DATA.meta.subline)||"",BUILT_LABEL].filter(Boolean).join(" · ");
+  $("#subline").textContent=sub;
+  if(BUILT_TITLE)$("#subline").title=BUILT_TITLE;
+  $("#rnote").textContent=(DATA.meta&&DATA.meta.note)||"";
+  backtestStat();
+
+  syncPosChips();
+  header(); sliders(); weightBars(); refresh();
+}
+
+/* The two dropdowns whose options are made of data. Rebuilt on every switch:
+   the site list is per-position, and a leftover "Sleeper ADP" option on a board
+   Sleeper doesn't price sorts every row to the same 999. */
+function rebuildSelects(){
+  const sel=$("#sortsel");
+  [...sel.querySelectorAll("option[data-pf]")].forEach(o=>o.remove());
+  const mk=[...sel.options].find(o=>o.value==="market");
+  if(mk){mk.hidden=!SHOW_MKT; mk.textContent="Market ("+mktWords()+")";}
+  const anchor=[...sel.options].find(o=>o.value==="floor");
+  PLATS.forEach(p=>{const o=document.createElement("option");
+    o.value=p; o.dataset.pf="1"; o.textContent=(PLABEL[p]||p)+" ADP";
+    sel.insertBefore(o,anchor);});
+  sel.value=sortMode;
+  $("#platsel").innerHTML='<option value="consensus">Consensus</option>'+
+    PLATS.map(p=>`<option value="${p}">${PLABEL[p]||p}</option>`).join("");
+  $("#platsel").value=draftPlatform;
+  $("#lwsel").value=lwMode;
+}
+/* Blocks written for one position only -- the archetype cards, Heath's screen --
+   are marked data-pos in the HTML and shown or hidden here. This is what lets a
+   single "How it works" tab explain whichever board you're on. */
+function applyPosGates(){
+  document.querySelectorAll("[data-pos]").forEach(el=>{el.hidden=el.dataset.pos!==POS;});
+}
+
+/* --- the shared explainer's position switcher ---------------------------- */
+function posChips(el,cb){
+  el.innerHTML=ORDER.map(p=>`<button type="button" data-p="${p}">${p}</button>`).join("");
+  el.querySelectorAll("button").forEach(b=>b.onclick=()=>cb(b.dataset.p));
+}
+function syncPosChips(){
+  document.querySelectorAll("#ovpos button").forEach(b=>
+    b.setAttribute("aria-pressed",String(b.dataset.p===POS)));
+  document.querySelectorAll("#tabs .tab").forEach(b=>b.setAttribute("aria-selected",
+    String(b.dataset.tab===activeTab && (!b.dataset.board || b.dataset.board===POS))));
+}
+
+/* ==========================================================================
+   THE BIG BOARD — every position in one ranking.
+
+   Ranked on value over replacement, because points per game are not comparable
+   across positions: the same 17 pts/gm is a middling quarterback and a top-three
+   running back, so ranking on the projection would hand you eight rounds of
+   quarterbacks before the first back. Replacement is the first unstartable
+   player at each position in a league this size -- QB12, RB30 -- which is
+   published per board in ratings_meta.repl_rank.
+
+   All of it is computed in the browser, on purpose. Projections move when you
+   drag a weight slider, so a cross-position ranking baked in at build time would
+   be wrong the moment you tuned anything.
+   ====================================================================== */
+let bigSort="vor", bigPos="ALL";
+function bigTeams(){
+  for(const p of ORDER){const t=(SITE.boards[p].ratings_meta||{}).teams; if(t)return t;}
+  return 12;
+}
+/* Overall pick, averaged over whichever sites price him. Overall pick and not a
+   positional rank because that is the only ADP unit that means the same thing at
+   every position -- QB12 and RB12 are nowhere near each other on a draft board. */
+function overallPick(x){
+  const v=Object.values(x.adp_picks||{}).filter(n=>n!=null);
+  return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;
+}
+function bigRows(){
+  const out=[];
+  ORDER.forEach(pos=>{
+    const ctx=ctxFor(pos), qs=(ctx.bd.qbs||[]);
+    const priced=qs.map(x=>({x,p:projIn(x,ctx)})).sort((a,b)=>b.p-a.p);
+    const ri=Math.min(replIndex(pos),Math.max(0,priced.length-1));
+    const repl=priced.length?priced[ri].p:0;
+    priced.forEach(r=>out.push({pos,x:r.x,proj:r.p,vor:r.p-repl,repl,pick:overallPick(r.x)}));
+  });
+  out.sort((a,b)=>b.vor-a.vor);
+  out.forEach((r,i)=>{r.rank=i+1; r.edge=r.pick==null?null:r.pick-r.rank;});
+  return out;
+}
+function bigHeader(){
+  $("#bighead").innerHTML=`<tr><th class="num">#</th><th>Player</th><th class="num">Proj</th>`+
+    `<th class="num" title="Points per game over the best player you could get for free at his position">Over replacement</th>`+
+    `<th class="num" title="Average overall pick across the sites in this file">Market pick</th>`+
+    `<th title="Where the market takes him against where this board ranks him">Vs market</th></tr>`;
+}
+function bigRefresh(){
+  const teams=bigTeams(), q=($("#bigsearch").value||"").trim().toLowerCase();
+  const all=bigRows();
+  const rows=all.filter(r=>(bigPos==="ALL"||r.pos===bigPos)&&(!q||r.x.name.toLowerCase().includes(q)));
+  const cmp={
+    vor:(a,b)=>b.vor-a.vor,
+    proj:(a,b)=>b.proj-a.proj,
+    adp:(a,b)=>((a.pick==null?999:a.pick)-(b.pick==null?999:b.pick))||(b.vor-a.vor),
+    // Biggest gap first: he lasts furthest past where this board wants him.
+    edge:(a,b)=>((b.edge==null?-999:b.edge)-(a.edge==null?-999:a.edge))||(b.vor-a.vor),
+  }[bigSort]||((a,b)=>b.vor-a.vor);
+  rows.sort(cmp);
+
+  // What replacement level actually is at each position, in points, right now.
+  const repl=ORDER.map(p=>{
+    const r=all.find(z=>z.pos===p);
+    const rm=SITE.boards[p].ratings_meta||{};
+    return r?`<b>${p}${rm.repl_rank||"–"}</b> at ${fmt(r.repl,1)}`:null;
+  }).filter(Boolean);
+  $("#bigrepl").innerHTML=`Replacement level right now — ${repl.join(", ")} pts/gm. `+
+    `Everything above is measured against those, in a ${teams}-team half-PPR league. `+
+    `Move a weight slider on any position tab and these move with it.`;
+
+  // Round rules, but only in the board's own order. Under any other sort the rows
+  // aren't in pick order, so a "ROUND 3" bar across them would be a lie.
+  const rule=(bigSort==="vor"&&bigPos==="ALL"&&!q);
+  let seen=0;
+  $("#bigbody").innerHTML=rows.map(r=>{
+    const rd=Math.ceil(r.rank/teams);
+    const bar=(rule&&rd>seen)?(seen=rd,`<tr class="rdsep"><td colspan="6">Round ${rd}</td></tr>`):"";
+    const ecls=r.edge==null?"":r.edge>=teams?"val":r.edge<=-teams?"rch":"";
+    const eword=r.edge==null?'<span class="mut">—</span>'
+      :r.edge>=teams?`<span class="vt g">▲ lasts ${Math.round(r.edge)} picks longer</span>`
+      :r.edge<=-teams?`<span class="vt r">▼ goes ${Math.round(-r.edge)} picks earlier</span>`
+      :`<span class="mut">about where he's drafted</span>`;
+    // data-bpos, NOT data-pos: data-pos is the show/hide gate for position-specific
+    // explainer blocks, and applyPosGates() would hide every row on this board that
+    // isn't the position you last had open.
+    return bar+`<tr class="row" data-bpos="${r.pos}" data-id="${r.x.rank}">
+      <td class="rank num">${r.rank}</td>
+      <td class="qb"><span class="pc ${r.pos}">${r.pos}</span> <b>${r.x.name}</b>${teamCell(r.x.team)}</td>
+      <td class="num">${fmt(r.proj,1)}</td>
+      <td class="num vor${r.vor<0?" neg":""}">${r.vor>0?"+":""}${fmt(r.vor,1)}</td>
+      <td class="num">${r.pick==null?'<span class="mut">—</span>':Math.round(r.pick)}</td>
+      <td class="rd ${ecls}">${eword}</td></tr>`;
+  }).join("")||`<tr><td colspan="6" class="note">Nobody matches that search.</td></tr>`;
+
+  $("#bigbody").querySelectorAll("tr.row").forEach(tr=>tr.onclick=()=>
+    jumpTo(tr.dataset.bpos,tr.dataset.id));
+  $("#bignote").textContent=`${rows.length} players across ${ORDER.join(", ")}. `+
+    `Projections are per game. Market pick is the average overall pick across the sites in this file, `+
+    `so a player nobody prices shows a dash rather than a guess.`;
+}
+/* Row click on the big board: open him where the full breakdown lives. */
+function jumpTo(pos,id){
+  if(pos!==POS)loadBoard(pos);
+  showTab("rankings");
+  const tr=document.querySelector(`#tbody tr.row[data-id="${id}"]`);
+  if(!tr)return;
+  const d=document.querySelector(`tr.detail[data-for="${id}"]`);
+  if(d&&d.style.display==="none")openPanel(tr,d);
+  tr.scrollIntoView({block:"center",behavior:"smooth"});
+}
+$("#bigsort").onchange=e=>{bigSort=e.target.value;bigRefresh();};
+$("#bigsearch").oninput=bigRefresh;
+
+/* --- boot ---------------------------------------------------------------- */
+posChips($("#ovpos"),p=>{loadBoard(p);});
+posChips($("#bigpos"),p=>{bigPos=(bigPos===p?"ALL":p);
+  document.querySelectorAll("#bigpos button").forEach(b=>
+    b.setAttribute("aria-pressed",String(b.dataset.p===bigPos)));
+  bigRefresh();});
+// "All" reads better as the un-pressed state of every chip than as a sixth chip.
+$("#bigpos").insertAdjacentHTML("afterbegin",'<span class="note" style="margin:0;padding:0 6px">Only&nbsp;</span>');
+bigHeader();
+buildTabs();
+loadBoard(POS);
+showTab("rankings");
 </script>
 </body>
 </html>

@@ -271,11 +271,10 @@ def main() -> None:
                 f"production from games through {config.CURRENT_SEASON}. A target counts as "
                 f"{rb_blend.TARGET_MULT}x a carry in half-PPR.",
     }
-    # See the matching note in scripts\06_build_qb_model.py: the cross-board link
-    # only exists on the published site, where the files are renamed.
-    if os.environ.get("BOARD_SITE_LINKS") == "1":
-        meta["sibling"] = {"href": "index.html", "label": "← QB board"}
+    # See the matching note in scripts\06_build_qb_model.py: the standalone page
+    # is this board alone, the saved board is the RB tab of the one-page site.
     (config.OUTPUT_DIR / "rb_model.html").write_text(report.render(result, meta), encoding="utf-8")
+    report.save_board(result, meta, config.OUTPUT_DIR / "boards" / "rb.json")
     rows = [{k: q.get(k) for k in ("rank", "name", "team", "mover", "starter", "depth_rank",
                                    "proj_ppg", "proj_total", "tier", "vor",
                                    "adp_label", "value_gap", "value_tag",

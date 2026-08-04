@@ -210,6 +210,7 @@ def main() -> None:
               + (" ..." if len(skipped) > 12 else ""))
 
     meta = {
+        "pos": "QB",
         "season": config.UPCOMING_SEASON, "season_label": season_label,
         # The report appends "built <date & time>" to this line itself, shown in
         # the reader's own timezone — so no generated-on date is needed here.
@@ -218,13 +219,12 @@ def main() -> None:
         "note": f"{len(result['payload'])} projected starters. Teams/starters from current depth charts; "
                 f"production from games through {config.CURRENT_SEASON}.",
     }
-    # Link across to the RB board, but only on the published site. The deploy
-    # workflow sets BOARD_SITE_LINKS=1 and renames the files there (qb ->
-    # index.html, rb -> rb.html); a board built on your own machine keeps its
-    # outputs\ filename, so that link would be dead. No link beats a broken one.
-    if os.environ.get("BOARD_SITE_LINKS") == "1":
-        meta["sibling"] = {"href": "rb.html", "label": "RB board →"}
+    # Two outputs, on purpose. qb_model.html is this board on its own, which is
+    # the thing to open if you only rebuilt the quarterbacks. The saved board is
+    # what scripts\12_build_site.py folds into the one-page site with the other
+    # positions, so a QB rebuild refreshes the QB tab and touches nothing else.
     (config.OUTPUT_DIR / "qb_model.html").write_text(report.render(result, meta), encoding="utf-8")
+    report.save_board(result, meta, config.OUTPUT_DIR / "boards" / "qb.json")
     rows = [{k: q.get(k) for k in ("rank", "name", "team", "archetype", "mover", "starter",
                                    "proj_ppg", "proj_total", "tier", "vor",
                                    "adp", "adp_label", "value_gap", "value_tag",
