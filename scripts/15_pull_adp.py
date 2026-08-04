@@ -86,6 +86,12 @@ ESPN_HEADERS = {
 # reason. 300 is roughly 25 rounds deep in a 12-team league.
 MAX_PICK = 300.0
 
+# The file is keyed on a squashed version of each name ("aj brown"), because that
+# is the only way four sites spell the same man the same way. But the file is also
+# something you open and read, so keep the real spelling as we see it and write
+# THAT into any row we add.
+REAL_NAMES = {}
+
 
 def _say(msg=""):
     print(msg, flush=True)
@@ -100,7 +106,7 @@ def pull_espn() -> dict:
         import requests
     except ImportError:
         _say("  [skip] ESPN -- the 'requests' package isn't installed.")
-        _say("         Run:  py -m pip install -r requirements.txt")
+        _say("         Run this once, then try again:  py -m pip install requests")
         return {}
 
     import json
@@ -144,7 +150,9 @@ def pull_espn() -> dict:
                 continue
             if not (0 < pick <= MAX_PICK):
                 continue
-            out[(pos, adp_mod.norm(name))] = round(pick, 1)
+            key = adp_mod.norm(name)
+            REAL_NAMES.setdefault(key, str(name).strip())
+            out[(pos, key)] = round(pick, 1)
         if len(players) < page_size:
             break
         offset += page_size
@@ -227,7 +235,9 @@ def parse_paste(path: pathlib.Path, label: str, teams: int = 12) -> dict:
             # No position on the line -- park it and let the merge match it to
             # whatever position that name already holds in the file.
             pos = "?"
-        out[(pos, adp_mod.norm(name))] = round(float(pick), 1)
+        key = adp_mod.norm(name)
+        REAL_NAMES.setdefault(key, str(name).strip())
+        out[(pos, key)] = round(float(pick), 1)
 
     if out:
         _say(f"  [ok]   {label} -- {len(out)} players from {path.name}")
@@ -244,11 +254,19 @@ def merge(existing: pd.DataFrame, pulls: dict) -> tuple[pd.DataFrame, dict]:
     df = existing.copy()
     if df.empty:
         df = pd.DataFrame(columns=["player", "pos", *adp_mod.PLATFORMS])
-    for col in ("player", "pos", *adp_mod.PLATFORMS):
+    for col in ("player", *adp_mod.PLATFORMS):
         if col not in df.columns:
             df[col] = pd.NA
-    df["pos"] = df["pos"].astype(str).str.upper().str.strip().replace(
-        {"": "QB", "NAN": "QB", "NONE": "QB"})
+    # An older file has no position column at all. The reader treats such a file
+    # as quarterbacks, so we have to write that down explicitly before adding
+    # anyone -- otherwise every existing row ends up position-less, no incoming
+    # quarterback matches it, and we quietly file a second copy of all of them.
+    default = getattr(adp_mod, "DEFAULT_POS", "QB")
+    if "pos" not in df.columns:
+        df["pos"] = default
+    df["pos"] = (df["pos"].astype("string").str.upper().str.strip()
+                 .replace({"": pd.NA, "NAN": pd.NA, "NONE": pd.NA, "<NA>": pd.NA})
+                 .fillna(default))
     df["key"] = df["player"].map(adp_mod.norm)
 
     # Where does each (pos, key) live? Also a name-only index so a pasted line
@@ -272,7 +290,7 @@ def merge(existing: pd.DataFrame, pulls: dict) -> tuple[pd.DataFrame, dict]:
                 if pos in ("?", None) or pos not in KEEP_POS:
                     continue            # can't file it without a position
                 new = {c: pd.NA for c in df.columns}
-                new["player"] = key.title()
+                new["player"] = REAL_NAMES.get(key) or key.title()
                 new["pos"] = pos
                 new["key"] = key
                 new[platform] = pick
