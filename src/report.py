@@ -33,6 +33,9 @@ def render(result: dict, meta: dict) -> str:
         "groups": result.get("groups", []),
         "calib": result.get("calib", {"a": 0, "b": 0.25}),
         "backtest": result.get("backtest", {}),
+        # ADP-expectation curve + the league-winner thresholds, so the page can
+        # show what the bars are instead of asking you to trust them.
+        "ratings_meta": result.get("ratings_meta", {}),
     }
     return _TEMPLATE.replace("__DATA_JSON__", json.dumps(payload))
 
@@ -193,6 +196,31 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .sortsel{font:inherit;font-size:13px;padding:6px 9px;border:1px solid var(--border);border-radius:9px;background:var(--surface-1);color:var(--ink)}
   .ov{display:grid;grid-template-columns:132px 1fr;gap:8px 14px;font-size:14px;color:var(--ink-2)}
   .ov .ovh{color:var(--ink);font-weight:600}
+  /* League-winner checklist: fixed published bars, pass/fail/not-measured. */
+  .lw{display:flex;flex-direction:column;gap:3px}
+  .lwr{display:grid;grid-template-columns:16px 1fr auto;gap:8px;align-items:baseline;font-size:13px}
+  .lwr .lwm{font-weight:800;text-align:center}
+  .lwr.y .lwm{color:var(--good)} .lwr.y .lwl{color:var(--ink);font-weight:600}
+  .lwr.n .lwm{color:var(--neg)}  .lwr.n .lwl{color:var(--ink-2)}
+  .lwr.u .lwm{color:var(--muted)}.lwr.u .lwl,.lwr.u .lwd{color:var(--muted)}
+  .lwr .lwd{color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px}
+  .lwcap{margin-top:6px;font-size:11.5px;line-height:1.5;color:var(--muted)}
+  /* The two Heath paths are an OR, so they get drawn as one bracketed group with
+     a divider rather than as two independent rows. The box IS the argument: it
+     says "one of these, not both" without needing a sentence to explain it. */
+  .lwgate{display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:12.5px}
+  .lwgate .gb{font-size:11px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;
+    padding:2px 7px;border-radius:999px;white-space:nowrap}
+  .lwgate.y .gb{color:var(--good);background:color-mix(in srgb,var(--good) 13%,transparent)}
+  .lwgate.n .gb{color:var(--neg);background:color-mix(in srgb,var(--neg) 13%,transparent)}
+  .lwgate.u .gb{color:var(--muted);background:var(--grid)}
+  .lwgate .gv{color:var(--ink-2)}
+  .lwpaths{border:1px solid var(--border);border-radius:9px;padding:7px 9px;background:var(--plane)}
+  .lwor{display:grid;grid-template-columns:16px 1fr;gap:8px;align-items:center;
+    margin:3px 0;font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--muted)}
+  .lwor::after{content:"";height:1px;background:var(--grid)}
+  .lwsub{margin:9px 0 3px;font-size:10.5px;font-weight:700;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--muted)}
   .num{text-align:right;font-variant-numeric:tabular-nums}
   .bartrack{display:inline-block;width:90px;height:9px;border-radius:5px;background:var(--grid);vertical-align:middle;margin-right:8px;overflow:hidden}
   .bar{height:9px;border-radius:5px;background:linear-gradient(90deg,var(--t3),var(--t2));display:block}
@@ -363,6 +391,16 @@ _TEMPLATE = r"""<!DOCTYPE html>
           Leave it on <b>Consensus</b> to compare the model to the market instead; open a row for the full gap.</div>
         <div class="ovh">Risk at ADP</div><div>Whether his price is worth it: paying an early pick for a shaky floor or thin
           ceiling — or reaching past where the model ranks him — is risky. A cheap QB is low-risk by definition.</div>
+        <div class="ovh">Worth the pick?</div><div>The same value question answered in <b>points</b> instead of draft slots — the unit that
+          actually decides a week. Four years of QB draft prices were joined to what those QBs really averaged, giving a curve of
+          <em>what a pick is worth</em>; this is his projection minus that. <b style="color:var(--good)">+5</b> a game is the league-winner
+          bar and <b style="color:var(--good)">+2</b> is ordinary good value. Beating the field by two ranking spots may win you nothing;
+          beating your draft slot by five points a game wins you weeks. It moves live with the weight sliders.</div>
+        <div class="ovh">League-winner shape</div><div>Four yes/no reads on whether he has the <em>profile</em> that historically wins
+          leagues, kept deliberately separate from the projection — &ldquo;how many points&rdquo; and &ldquo;what kind of player&rdquo; are
+          different questions. Rushing volume is quoted as a <b>17-game pace</b>, so a QB who started four games on a 99-carry pace is
+          credited for the pace rather than punished for the missed time. Unlike the factor bars these are <b>fixed thresholds, not
+          percentiles</b> — every QB in a weak year can fail all of them.</div>
       </div>
     </div>
     <div class="card">
@@ -376,7 +414,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <div class="ovh">&ldquo;Why&rdquo; flags</div><div>The transparent reasons behind a profile:
           <span class="fl g">Ascending</span> <span class="fl g">Elite rusher</span> <span class="fl g">Strong team</span>
           <span class="fl r">Weak team</span> <span class="fl r">Thin cast</span> <span class="fl a">New team</span>.
-          Vegas win totals now feed the team flags (and a Vegas factor is in the blend).</div>
+          Vegas win totals now feed the team flags (and a Vegas factor is in the blend).
+          Two chips come from fixed league-winner bars rather than from this field's percentiles:
+          <span class="fl g">+5 over ADP</span> (beating what his draft slot is worth by five points a game) and
+          <span class="fl g">100+ rush pace</span> / <span class="fl r">No rush floor</span> (17-game rushing-attempt pace above 100, or below 55).</div>
         <div class="ovh">The one real edge</div><div><span class="fl g">Ascending</span> (year 2–3 QBs) is the single spot the backtest found the <em>market itself</em> underrates. Treat it as a genuine lean; the other flags are for understanding, not overrides.</div>
       </div>
     </div>
@@ -607,7 +648,89 @@ function platEdgeLine(o){
   return `<div class="ovh">On ${lab}</div><div><b>QB${e.mine}</b> here vs market <b>QB${e.mkt}</b> <span style="color:var(--muted)">(Underdog + FFC)</span> — ${verdict}</div>`;
 }
 const FLAGCLS={up:"g",down:"r",warn:"a"};
-function flagChips(x){const f=x.flags||[];if(!f.length)return '<span class="mut" style="font-size:11px">—</span>';return f.map(t=>`<span class="fl ${FLAGCLS[t[0]]||'n'}">${t[1]}</span>`).join(" ");}
+/* --- Value in POINTS, not in draft slots --------------------------------
+   exp_fpg is what a QB drafted at his price has historically been worth per
+   game (fixed — it's a property of the price, not of our weights). The EDGE is
+   projection minus that, so it has to be computed here: dragging a weight
+   slider changes the projection, and a number baked in at build time would
+   quietly go stale the moment you touched the board. */
+const RMETA=DATA.ratings_meta||{};
+const LWB=RMETA.lw_bars||{fpg:5,value_fpg:2,att_floor:55,att_high:100,rush_fpg:5};
+const CURVE=RMETA.curve||null;
+function edgeFpg(x){return x.exp_fpg==null?null:projOf(x)-x.exp_fpg;}
+function edgeTag(v){return v==null?null:v>=LWB.fpg?"League winner":v>=LWB.value_fpg?"Value":v<=-LWB.value_fpg?"Pricey":null;}
+function flagChips(x){
+  const f=(x.flags||[]).slice(), e=edgeFpg(x);
+  if(e!=null&&e>=LWB.fpg)f.unshift(["up",`+${e.toFixed(0)} over ADP`]);
+  if(!f.length)return '<span class="mut" style="font-size:11px">—</span>';
+  return f.slice(0,6).map(t=>`<span class="fl ${FLAGCLS[t[0]]||'n'}">${t[1]}</span>`).join(" ");
+}
+/* Reads as a sentence: what he's projected for, what the pick is worth, the gap. */
+function valuePointsLine(o){
+  const e=edgeFpg(o);
+  if(e==null)return '<span style="color:var(--muted)">no draft price to score him against</span>';
+  const tag=edgeTag(e), cls=e>=LWB.value_fpg?"g":e<=-LWB.value_fpg?"r":"n";
+  const sign=e>0?"+":"";
+  const src=o.value_fpg_src?` <span style="color:var(--muted)">(${o.value_fpg_src} price)</span>`:"";
+  /* Two different sentences, because the two curves mean different things. The
+     historical curve says what QBs at this price ACTUALLY did; the board fallback
+     only says what this year's market implies. Saying "have averaged" about the
+     fallback would claim evidence that isn't there. */
+  const basis=CURVE&&CURVE.source==="board"
+    ?`vs the ${fmt(o.exp_fpg,1)} this year's price curve implies at that cost`
+    :`vs the ${fmt(o.exp_fpg,1)} QBs drafted around here have actually averaged`;
+  return `${bdg(tag||"Fair price",cls)} <b>${sign}${fmt(e,1)} pts/gm</b>
+    <span style="color:var(--muted)">— ${fmt(projOf(o),1)} projected ${basis}</span>${src}`;
+}
+/* The checklist is intentionally NOT folded into the projection. "Will he score
+   points" and "does he have the shape that wins leagues" are different
+   questions; blending them would hide the second inside the first.
+
+   The top two rows are Heath's two paths and they are an OR, not a tally: "every
+   late-round QB to make the playoffs in 45%+ of ESPN leagues since 2021 fits one
+   of these two criteria." So one path is a full pass. Clearing both is not extra
+   credit and clearing only one is not a partial — which is why this renders as a
+   gate with a bracketed either/or group, and why the old "cleared N of 4" caption
+   is gone. That count quietly punished a pocket passer in a Shanahan offense for
+   missing a bar the research never asked him to clear. */
+function lwChecklist(o){
+  const cs=o.lw_checks||[];
+  if(!cs.length)return '<span style="color:var(--muted)">—</span>';
+  const row=c=>{
+    const st=c.pass===true?["y","✓"]:c.pass===false?["n","✗"]:["u","·"];
+    const t=c.why?` title="${String(c.why).replace(/"/g,"&quot;")}"`:"";
+    return `<div class="lwr ${st[0]}"${t}><span class="lwm">${st[1]}</span>`+
+      `<span class="lwl">${c.label}</span><span class="lwd">${c.detail||""}</span></div>`;
+  };
+  /* Fall back to flat rendering if an older payload has no groups, so a stale
+     qb_data.json can't blank the panel out. */
+  const paths=cs.filter(c=>c.group==="path"), sup=cs.filter(c=>c.group==="support");
+  if(!paths.length)return `<div class="lw">${cs.map(row).join("")}</div>`;
+
+  const g=o.lw_gate, via=o.lw_gate_via||[];
+  const gs=g===true?["y","Clears the screen"]:g===false?["n","Misses both paths"]
+                                                       :["u","Not enough data"];
+  /* Don't lowercase the label: it opens on a proper noun, so "via mcshanahan
+     play-caller" reads as a typo. And when he misses both, the badge has already
+     said it -- a trailing "neither path" is the same sentence twice. */
+  const gv=g===true
+    ?(via.length>1?"via both paths":`via ${via[0]}`)
+    :g===false?"":"one path couldn't be measured";
+  const cap=g===false
+    ?`Since 2021 every late-round QB with a 45%+ playoff rate had <b>one</b> of the two —
+      100+ rush attempts or a McShanahan-tree play-caller. This profile has neither.`
+    :`Either path on its own is enough; a QB needs one, not both. Stated for QBs drafted
+      after Round 10, so for an early pick read it as context rather than a verdict.`;
+
+  return `<div class="lwgate ${gs[0]}"><span class="gb">${gs[1]}</span>
+      <span class="gv">${gv}</span></div>
+    <div class="lwpaths">${row(paths[0])}
+      <div class="lwor"><span>or</span></div>
+      ${paths.slice(1).map(row).join("")}</div>`+
+    (sup.length?`<div class="lwsub">Supporting</div><div class="lw">${sup.map(row).join("")}</div>`:"")+
+    `<div class="lwcap">${cap} These are fixed published thresholds, not percentiles —
+      a whole weak field can miss every one of them, which is the point.</div>`;
+}
 const PF=PLATS.map(p=>[p,PLABEL[p]||p]);
 /* The draft-slot block, as one small table: a row per way of quoting the price,
    a column per site, and Market last and bold because it's the number the site
@@ -673,6 +796,8 @@ function overlays(o){
   return `<div class="ov" style="margin:2px 0 16px">
     <div class="ovh">Draft slot (ADP)</div><div>${adpTable(o)}</div>
     ${platEdgeLine(o)}
+    <div class="ovh">Worth the pick?</div><div>${valuePointsLine(o)}</div>
+    <div class="ovh">League-winner shape</div><div>${lwChecklist(o)}</div>
     <div class="ovh">Floor</div><div>${bdg(o.floor_bucket,FCLS[o.floor_bucket])} <span style="color:var(--muted)">bad-week baseline ≈ ${fmt(o.floor_pts,1)} pts/gm</span></div>
     <div class="ovh">Ceiling</div><div>${bdg(o.ceiling_bucket,CCLS[o.ceiling_bucket])} <span style="color:var(--muted)">${o.boom25!=null?o.boom25:"–"}% of games 25+, ${o.boom30!=null?o.boom30:"–"}% 30+</span></div>
     <div class="ovh">Risk at ADP</div><div>${bdg(o.risk_bucket,RCLS[o.risk_bucket])} <span style="color:var(--muted)">${riskWhy(o)}</span></div>

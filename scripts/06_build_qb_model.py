@@ -135,6 +135,21 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001
         print(f"  [note] Headshots skipped ({type(exc).__name__}: {exc}).")
 
+    # The ADP-expectation curve is the backbone of the points-space value tag, so
+    # say out loud what it was fit on -- a silently-degraded curve would still
+    # produce confident-looking numbers.
+    cv = (result.get("ratings_meta") or {}).get("curve")
+    if not cv:
+        print("  [note] No ADP expectation curve — 'worth the pick?' in points is skipped. "
+              "Check data/adp_history.csv exists and its names match.")
+    elif cv.get("source") == "board":
+        print("  [note] ADP curve fell back to THIS year's prices (data/adp_history.csv "
+              "missing or wouldn't join). It can only say 'cheap for this year's market'.")
+    else:
+        print(f"  ADP expectation curve: {cv['n']} QB seasons over "
+              f"{'-'.join(str(s) for s in (cv['seasons'][:1] + cv['seasons'][-1:]))}, "
+              f"R²={cv['r2']} ({cv['missed']} drafted QBs never played enough to score)")
+
     bt = result.get("backtest", {})
     if bt:
         print(f"\n  Backtest ({' & '.join(str(s) for s in bt['seasons'])}): "
@@ -157,6 +172,8 @@ def main() -> None:
     rows = [{k: q.get(k) for k in ("rank", "name", "team", "archetype", "mover", "starter",
                                    "proj_ppg", "proj_total", "tier", "vor",
                                    "adp", "adp_label", "value_gap", "value_tag",
+                                   "exp_fpg", "value_fpg", "value_fpg_tag",
+                                   "rush_att_pace", "rush_fpg", "lw_score",
                                    "floor_pts", "floor_bucket", "boom25", "boom30",
                                    "ceiling_bucket", "risk_bucket")} for q in result["payload"]]
     pd.DataFrame(rows).to_csv(config.OUTPUT_DIR / "qb_projections.csv", index=False)

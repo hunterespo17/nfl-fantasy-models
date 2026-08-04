@@ -14,8 +14,12 @@ What makes the "who the player is" side trustworthy:
     reaches back more than 5 years -- so a long-ago season (or an injury year)
     doesn't define a player. Most recent healthy season is weighted most.
   * Touchdowns are REGRESSED toward what the player's yardage predicts, because
-    TD totals are volatile year-to-year while yards are sticky. Rushing value is
-    therefore driven by rushing YARDS, not by a lucky/unlucky TD count.
+    TD totals are volatile year-to-year while yards are sticky. Rushing PRODUCTION
+    is therefore driven by rushing YARDS, not by a lucky/unlucky TD count.
+  * The Rushing factor is half production and half VOLUME (rush attempts per
+    game). Attempts are a coaching decision and repeat year-to-year far better
+    than yards or TDs do, which makes volume the more forecastable half of QB
+    rushing -- and it is the unit every published rushing threshold uses.
   * Thin resumes are pulled toward the field: a QB with few career games has his
     talent shrunk toward the pack (sample-size regression), so a tiny hot sample
     can't crown someone.
@@ -38,12 +42,14 @@ K_TD = 8.0          # TD regression: games needed to fully trust observed TDs
 K_CAREER = 12.0     # sample-size regression: shrink strength on career games
 HEALTHY_GAMES = 12  # a "healthy" season is at least this many games played
 RECENCY = 5         # never reach back more than this many seasons for talent
+RUSH_VOL_W = 0.5    # Rushing index: share given to attempt VOLUME vs production
 
 # Raw signals surfaced in each QB's detail panel, with friendly labels.
 SIGNALS = {
     "talent_reg": "Talent · last 3 healthy (reg fp/gm)",
     "talent_final": "Talent · after sample-size reg",
     "rush_val": "Rushing value (reg fp/gm)",
+    "rush_att_pg": "Rush attempts/gm",
     "pass_val": "Passing value (reg fp/gm)",
     "career_games": "Career games",
     "age": "Age",
@@ -82,6 +88,37 @@ def win_totals() -> dict:
         except Exception:
             _WT_CACHE = {}
     return _WT_CACHE
+
+
+# Who actually calls the offensive plays -> data/playcallers.csv. Hand-maintained,
+# because nflverse only gives us the head coach and the head coach is the play-caller
+# for barely half the league (17 of 32 in 2026). See PLAYCALLER_PLAN.md.
+_PC_CACHE = None
+
+
+def playcallers() -> dict:
+    """{(season, team): {"playcaller", "role", "tree"}} from data/playcallers.csv.
+
+    Same swallow-everything contract as win_totals(): a hand-typed file must never
+    be able to take the site down, so anything unparseable degrades to {} and the
+    play-caller check quietly reads "not tracked". That is the right behaviour live
+    and the wrong behaviour for a typo, which is why scripts/09_check_playcallers.py
+    exists -- run it after every edit.
+    """
+    global _PC_CACHE
+    if _PC_CACHE is None:
+        from . import config
+        try:
+            pc = pd.read_csv(config.DATA_DIR / "playcallers.csv")
+            _PC_CACHE = {
+                (int(r.season), str(r.team)): {
+                    "playcaller": str(r.playcaller), "role": str(r.role), "tree": str(r.tree)
+                }
+                for r in pc.itertuples()
+            }
+        except Exception:
+            _PC_CACHE = {}
+    return _PC_CACHE
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +233,10 @@ def season_aggregates(weekly: pd.DataFrame, scoring_rules: dict | None) -> pd.Da
     sa["rush_fp_reg_pg"] = (sa["rush_yds"] * 0.1 + reg_rush_td * 6) / g
     sa["pass_fp_reg_pg"] = (sa["pass_yds"] * 0.04 + reg_pass_td * 4 - sa["interceptions"] * 2) / g
     sa["tot_fp_reg_pg"] = sa["rush_fp_reg_pg"] + sa["pass_fp_reg_pg"]
+    # Rushing VOLUME, kept separate from rushing production. Attempts are the
+    # unit every league-winner rushing threshold is stated in (55 / 100 over a
+    # season), and per-game keeps it honest for QBs who missed time.
+    sa["rush_att_pg"] = sa["carries"] / g
     return sa
 
 
@@ -228,6 +269,7 @@ def _bundle(pdf: pd.DataFrame, as_of: int) -> dict | None:
     return {
         "talent_reg": float(np.average(use["tot_fp_reg_pg"].to_numpy(), weights=wts)),
         "rush_val": float(use["rush_fp_reg_pg"].mean()),
+        "rush_att_pg": float(use["rush_att_pg"].mean()) if "rush_att_pg" in use else np.nan,
         "pass_val": float(use["pass_fp_reg_pg"].mean()),
         "career_games": float(prior["games"].sum()),
         "healthy_recent": bool(len(healthy) > 0),
@@ -316,7 +358,15 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
         return p.groupby("season")[col].transform(lambda s: s.rank(pct=True) * 100)
 
     p["Talent"] = pct("talent_final")
-    p["Rushing"] = pct("rush_val")
+    # Rushing = production + VOLUME. Attempts are a coaching decision and repeat
+    # year to year much better than rushing yards or TDs do, so volume is the
+    # forecastable half; production keeps goal-line and big-play value in view.
+    _rush_prod = pct("rush_val")
+    _rush_vol = pct("rush_att_pg")
+    if _rush_vol.notna().any():
+        p["Rushing"] = (1 - RUSH_VOL_W) * _rush_prod + RUSH_VOL_W * _rush_vol.fillna(_rush_prod)
+    else:
+        p["Rushing"] = _rush_prod        # older cache without carries: production only
     p["Situation"] = pd.concat([pct("pass_rate"), pct("proe"), pct("plays_pg")], axis=1).mean(axis=1)
     p["Scoring env"] = pd.concat([pct("implied_total_avg"), pct("points_pg")], axis=1).mean(axis=1)
     p["Vegas"] = pct("win_total")            # forward-looking team quality (preseason win total)
@@ -413,6 +463,16 @@ def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
             "vor": round(float(r["vor"]), 1),
             "career_games": (round(float(row["career_games"])) if pd.notna(row.get("career_games")) else None),
             "age": (round(float(row["age"])) if pd.notna(row.get("age")) else None),
+            # Explicit numeric fields (not just SIGNALS, which is label-keyed) so
+            # ratings.py can test the published rushing thresholds directly.
+            # "pace" = per-game extrapolated to a 17-game season, which is how the
+            # thresholds are stated and keeps QBs who missed time honest.
+            "rush_att_pg": (round(float(row["rush_att_pg"]), 2)
+                            if pd.notna(row.get("rush_att_pg")) else None),
+            "rush_att_pace": (round(float(row["rush_att_pg"]) * 17.0)
+                              if pd.notna(row.get("rush_att_pg")) else None),
+            "rush_fpg": (round(float(row["rush_val"]), 2)
+                         if pd.notna(row.get("rush_val")) else None),
             "indices": {g: round(float(row.get(g, 50.0)), 1) for g in GROUPS},
             "signals": {label: round(float(row[col]), 2) for col, label in SIGNALS.items()
                         if col in row and pd.notna(row.get(col))},

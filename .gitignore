@@ -9,6 +9,8 @@ outputs/
 # be re-pulled from nflverse.
 !data/adp.csv
 !data/win_totals.csv
+!data/adp_history.csv
+!data/playcallers.csv
 
 # Python
 __pycache__/
