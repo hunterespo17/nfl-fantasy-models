@@ -152,6 +152,28 @@ def save_board(result: dict, meta: dict, path) -> Path:
     return path
 
 
+def build_site(folder, out_path):
+    """Fold every saved board into one page. Returns (path, boards).
+
+    Called by each position build as its last act, so the one-page site is never
+    a step you can forget. Returns (None, []) when there is nothing saved yet
+    rather than writing an empty page.
+    """
+    boards = load_boards(folder)
+    if not boards:
+        return None, []
+    boards.sort(key=lambda pair: (_POS_ORDER.index(pair[1]["pos"])
+                                  if pair[1].get("pos") in _POS_ORDER else 99,
+                                  pair[1].get("pos", "")))
+    # The page's heading comes from whichever position leads the tabs, so the
+    # title doesn't change depending on which board happened to build last.
+    page_meta = {k: v for k, v in boards[0][1].items() if k != "pos"}
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_site(boards, page_meta), encoding="utf-8")
+    return out, boards
+
+
 def load_boards(folder) -> list[tuple[dict, dict]]:
     """Every saved board in a folder, in the shape render_site() wants.
 

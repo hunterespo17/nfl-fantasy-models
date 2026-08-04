@@ -60,6 +60,27 @@ POS = "RB"
 KEEP_DEPTH = 3          # RB1 / RB2 / RB3 on each depth chart
 
 
+def _refresh_site() -> None:
+    """Rebuild the one-page board, so it is never a command you can forget.
+
+    Wrapped in a catch on purpose: a problem assembling the combined page must
+    not throw away the board this script just spent two minutes building.
+    """
+    print(f"\nThis board on its own:  {config.OUTPUT_DIR / 'rb_model.html'}")
+    try:
+        out, boards = report.build_site(config.OUTPUT_DIR / "boards",
+                                        config.OUTPUT_DIR / "index.html")
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"  (couldn't refresh the combined page: {exc})")
+        print("   Run  py scripts\\12_build_site.py  to try again.")
+        return
+    if out is None:
+        return
+    tabs = " + ".join(m.get("pos", "?") for _, m in boards)
+    print(f"\n  >>> OPEN THIS ONE:  {out}")
+    print(f"      All positions on one page ({tabs}), plus the Big Board.")
+
+
 def _scoring_label() -> str:
     r = config.SCORING.get("reception", 1.0)
     return {1.0: "Full PPR", 0.5: "Half PPR", 0.0: "Standard"}.get(r, f"{r}/rec")
@@ -296,7 +317,7 @@ def main() -> None:
               f"bkfld {bf:<5} tch/g {str(q.get('opp_pg', '—')):<5} ADP {adp:<5} "
               f"floor:{q.get('floor_bucket', '?'):<8} ceil:{q.get('ceiling_bucket', '?'):<6} "
               f"risk:{q.get('risk_bucket', '?')}{tag}{flag}")
-    print(f"\nSaved report to: {config.OUTPUT_DIR / 'rb_model.html'}")
+    _refresh_site()
     print("If any team or depth spot looks wrong, open current_map_debug_rb.txt and send it to me.")
 
 

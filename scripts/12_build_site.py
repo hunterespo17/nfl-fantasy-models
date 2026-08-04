@@ -57,9 +57,9 @@ TAB_ORDER = ["QB", "RB", "WR", "TE", "K", "DST"]
 
 def main() -> int:
     folder = config.OUTPUT_DIR / "boards"
-    boards = report.load_boards(folder)
+    out, boards = report.build_site(folder, config.OUTPUT_DIR / "index.html")
 
-    if not boards:
+    if out is None:
         print("No boards to combine.")
         print(f"  Looked in: {folder}")
         print("  Build at least one position first, then run this again:")
@@ -67,25 +67,12 @@ def main() -> int:
         print("    py scripts\\11_build_rb_model.py")
         return 1
 
-    boards.sort(key=lambda pair: (TAB_ORDER.index(pair[1]["pos"])
-                                  if pair[1].get("pos") in TAB_ORDER else 99,
-                                  pair[1].get("pos", "")))
-
-    # The page's own heading comes from the first board -- whichever position
-    # leads the tabs owns the season label at the top, and they all share one.
-    page_meta = dict(boards[0][1])
-    page_meta.pop("pos", None)
-
-    out = config.OUTPUT_DIR / "index.html"
-    html = report.render_site(boards, page_meta)
-    out.write_text(html, encoding="utf-8")
-
     print("Built one page from these boards:")
     for result, meta in boards:
         n = len(result.get("payload", []))
         print(f"  {meta.get('pos', '??'):<4} {n:>4} players")
     print(f"\nSaved to: {out}")
-    print(f"  ({len(html):,} characters)")
+    print(f"  ({out.stat().st_size:,} bytes)")
     print("Open that file in your browser. Tabs across the top: one per")
     print("position, then Big Board, then How it works.")
 

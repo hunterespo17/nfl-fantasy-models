@@ -53,6 +53,27 @@ def _scoring_label() -> str:
     return {1.0: "Full PPR", 0.5: "Half PPR", 0.0: "Standard"}.get(r, f"{r}/rec")
 
 
+def _refresh_site() -> None:
+    """Rebuild the one-page board, so it is never a command you can forget.
+
+    Wrapped in a catch on purpose: a problem assembling the combined page must
+    not throw away the board this script just spent two minutes building.
+    """
+    print(f"\nThis board on its own:  {config.OUTPUT_DIR / 'qb_model.html'}")
+    try:
+        out, boards = report.build_site(config.OUTPUT_DIR / "boards",
+                                        config.OUTPUT_DIR / "index.html")
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"  (couldn't refresh the combined page: {exc})")
+        print("   Run  py scripts\\12_build_site.py  to try again.")
+        return
+    if out is None:
+        return
+    tabs = " + ".join(m.get("pos", "?") for _, m in boards)
+    print(f"\n  >>> OPEN THIS ONE:  {out}")
+    print(f"      All positions on one page ({tabs}), plus the Big Board.")
+
+
 def main() -> None:
     # Loud check: if a stale .pyc still shadowed the new source, say so plainly
     # instead of silently producing an old-looking board.
@@ -242,7 +263,7 @@ def main() -> None:
         print(f"  {q['rank']:>2}. {q['name']:<22} {q['team']:<4} {q['proj_ppg']:>5.1f} pts/gm  "
               f"{q['archetype']:<13} ADP {adp:<5} floor:{q.get('floor_bucket','?'):<8} "
               f"ceil:{q.get('ceiling_bucket','?'):<6} risk:{q.get('risk_bucket','?')}{tag}{flag}")
-    print(f"\nSaved report to: {config.OUTPUT_DIR / 'qb_model.html'}")
+    _refresh_site()
     print("If any team/starter looks wrong, open current_map_debug.txt and send it to me.")
 
 
