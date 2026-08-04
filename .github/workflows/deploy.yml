@@ -51,27 +51,24 @@ jobs:
       # page you actually draft from — off the internet.
       - name: Build the RB board (optional)
         continue-on-error: true
-        env:
-          BOARD_SITE_LINKS: '1'
         run: python scripts/11_build_rb_model.py
 
-      # Did it actually produce a page? The answer decides whether the QB board
-      # is rendered with a link across to it, so the link is never a dead one.
       - name: Did the RB board build?
-        id: rbcheck
         run: |
-          if [ -s outputs/rb_model.html ]; then
-            echo "has_rb=true" >> "$GITHUB_OUTPUT"
-            echo "RB board is $(wc -c < outputs/rb_model.html) bytes"
+          if [ -s outputs/boards/rb.json ]; then
+            echo "RB board saved, $(wc -c < outputs/boards/rb.json) bytes"
           else
-            echo "has_rb=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::RB board did not build — deploying the QB board alone."
+            echo "::warning::RB board did not build — deploying without the RB tab."
           fi
 
       - name: Build the QB board
-        env:
-          BOARD_SITE_LINKS: ${{ steps.rbcheck.outputs.has_rb == 'true' && '1' || '0' }}
         run: python scripts/06_build_qb_model.py
+
+      # Folds every position that built into ONE page with a tab each, plus the
+      # Big Board and How-it-works. A position that failed above simply has no
+      # saved board, so it gets no tab and the rest of the page is unaffected.
+      - name: Put every position on one page
+        run: python scripts/12_build_site.py
 
       # Nice-to-have historical page. If it errors, the board still deploys.
       - name: Build the backtest page (optional)
@@ -81,15 +78,23 @@ jobs:
       - name: Assemble the site
         run: |
           mkdir -p site
-          cp outputs/qb_model.html site/index.html
+          if [ -s outputs/index.html ]; then
+            cp outputs/index.html site/index.html
+          else
+            echo "::warning::Combined page missing — falling back to the QB board alone."
+            cp outputs/qb_model.html site/index.html
+          fi
+          # Old bookmark insurance: the boards used to live at these addresses.
+          # They are single-position pages now, not linked from anywhere.
+          if [ -f outputs/qb_model.html ]; then cp outputs/qb_model.html site/qb.html; fi
           if [ -f outputs/rb_model.html ]; then cp outputs/rb_model.html site/rb.html; fi
           if [ -f outputs/qb_backtest.html ]; then cp outputs/qb_backtest.html site/backtest.html; fi
 
       - name: Sanity-check the board built
         run: |
           test -s site/index.html || { echo "::error::Board HTML is missing or empty"; exit 1; }
-          echo "QB board is $(wc -c < site/index.html) bytes"
-          if [ -s site/rb.html ]; then echo "RB board is $(wc -c < site/rb.html) bytes"; fi
+          echo "Site page is $(wc -c < site/index.html) bytes"
+          grep -q '"boards"' site/index.html || { echo "::error::Page has no board data"; exit 1; }
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
