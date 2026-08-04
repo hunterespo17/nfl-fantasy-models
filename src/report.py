@@ -141,6 +141,19 @@ _TEMPLATE = r"""<!DOCTYPE html>
   thead th.num{text-align:right}
   tbody td{padding:12px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
   tbody tr.row{cursor:pointer;transition:background .12s}tbody tr.row:hover{background:var(--accent-soft)}
+  /* League-winner filter. Non-matching QBs are dimmed and sorted underneath rather
+     than removed: mid-draft, the row you suddenly need is exactly the one a real
+     filter would have hidden. Hovering brings a dimmed row most of the way back so
+     it stays readable when you go looking for a name that just got called. */
+  tbody tr.row.dim>td{opacity:.36;transition:opacity .12s}
+  tbody tr.row.dim:hover>td{opacity:.8}
+  /* A labelled row rather than a heavier border. Every row already has a rule under
+     it, so a 2px version of the same line reads as noise instead of as a boundary --
+     and the boundary is the one thing on a filtered board you shouldn't have to infer. */
+  tbody tr.lwsep>td{border-top:2px solid var(--accent);padding:8px 10px 7px;font-size:11px;
+    text-transform:uppercase;letter-spacing:.05em;font-weight:700;color:var(--ink-2);background:var(--plane)}
+  .lwcount{margin:0!important;font-variant-numeric:tabular-nums}
+  .lwcount b{color:var(--ink);font-weight:700}
   .rank{font-variant-numeric:tabular-nums;color:var(--accent);font-weight:800;font-size:15px;width:32px}
   /* Wide table: on a narrow screen it scrolls sideways instead of overflowing the
      page. Names and badges never break mid-word — when the column gets tight the
@@ -418,6 +431,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
           Two chips come from fixed league-winner bars rather than from this field's percentiles:
           <span class="fl g">+5 over ADP</span> (beating what his draft slot is worth by five points a game) and
           <span class="fl g">100+ rush pace</span> / <span class="fl r">No rush floor</span> (17-game rushing-attempt pace above 100, or below 55).</div>
+        <div class="ovh">The &ldquo;League winners&rdquo; filter</div><div>Heath's finding is that every late-round QB to make the playoffs in 45%+ of ESPN leagues since 2021 either ran 100+ times or played for a McShanahan-tree play-caller — <em>one of the two, not both</em>.
+          It's a claim about <b>cheap</b> quarterbacks, which is why <b>&ldquo;Late-round winners&rdquo;</b> is the setting that matches the research: it's the two paths <em>plus</em> a draft cost after Round 10.
+          Run against the whole board (&ldquo;any round&rdquo;) it hands you Josh Allen and Jayden Daniels — true, and no help, because you already knew.
+          Nothing is ever removed: QBs that don't fit are greyed out and moved below a labelled line, so the guy you suddenly need when your target gets sniped is still right there.</div>
         <div class="ovh">The one real edge</div><div><span class="fl g">Ascending</span> (year 2–3 QBs) is the single spot the backtest found the <em>market itself</em> underrates. Treat it as a genuine lean; the other flags are for understanding, not overrides.</div>
       </div>
     </div>
@@ -450,9 +467,19 @@ _TEMPLATE = r"""<!DOCTYPE html>
             <option value="ceiling">Ceiling</option>
             <option value="risk">Risk</option>
           </select></label>
+        <label class="note" style="margin:0">League winners&nbsp;
+          <select class="sortsel" id="lwsel" title="Heath's two-path screen, applied to the board. Nothing is hidden — non-matches are dimmed and sorted below.">
+            <option value="all">All QBs</option>
+            <option value="late">Late-round winners (after Rd 10)</option>
+            <option value="any">Clears a path — any round</option>
+            <option value="rush">— via rushing (100+ att)</option>
+            <option value="pc">— via McShanahan play-caller</option>
+            <option value="miss">Misses both paths</option>
+          </select></label>
         <input class="search" id="search" type="search" placeholder="Search a QB…" aria-label="Search">
         <span class="note" style="margin:0">Click a row for the full breakdown.</span>
       </div>
+      <p class="note lwcount" id="lwcount" style="margin-top:10px"></p>
     </div>
     <div class="card" style="padding:14px 16px">
       <div class="tblwrap"><table id="tbl"><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
@@ -574,6 +601,8 @@ function syncSliderLabels(){const s=sumW();
   document.querySelectorAll('#sliders b[data-w]').forEach(b=>b.textContent=(100*(weights[b.dataset.w]||0)/s).toFixed(0)+"%");}
 
 const REPL=11; // replacement level ~ QB12 (12-team, 1QB)
+const TEAMS=REPL+1;    // the same league setting REPL is derived from
+const RD10=TEAMS*10;   // pick 120: the last pick of Round 10, which is where Heath's screen starts
 function tiers(sorted){ // gap-based on proj
   const v=sorted.map(q=>q._p); if(v.length<2){sorted.forEach(q=>q._tier=1);return;}
   const d=[];for(let i=1;i<v.length;i++)d.push(v[i-1]-v[i]);
@@ -820,6 +849,60 @@ function sortCmp(m){
 })[m]||((a,b)=>b._p-a._p);}
 let sortMode="proj";
 
+/* --- the league-winner filter --------------------------------------------
+   Heath's two paths are a screen for LATE quarterbacks: every late-round QB to make
+   the playoffs in 45%+ of ESPN leagues since 2021 fits one of them, and he states it
+   for picks after Round 10. Run against Josh Allen it is trivially true and tells you
+   nothing you didn't know, so "late" is the mode that actually matches the research
+   and the rest are here to answer narrower questions.
+
+   The path modes stay round-agnostic on purpose. "Which of these guys is in a
+   Shanahan offense" is a different question from "who's a late flier", and folding
+   the round into both would leave no way to ask the first one. */
+let lwMode="all";
+/* Overall pick number, on whichever platform you're drafting on -- and the average of
+   the sites that price him when you're on Consensus. Overall pick rather than QB rank
+   because "Round 10" is a claim about the pick, and QB18 goes in a different round
+   depending on how the rest of the board falls. */
+function pickOf(x){
+  const ps=x.adp_picks||{};
+  if(draftPlatform!=="consensus"&&ps[draftPlatform]!=null)return ps[draftPlatform];
+  const v=PLATS.map(p=>ps[p]).filter(n=>n!=null);
+  return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;
+}
+const viaHas=(x,re)=>(x.lw_gate_via||[]).some(s=>re.test(s));
+function lwMatch(x){
+  switch(lwMode){
+    // An unpriced QB has no round, so he cannot be shown to be late. He stays on the
+    // board dimmed rather than passing on data we don't have -- same rule the gate
+    // itself uses, where unmeasured is never treated as a fail or a pass.
+    case "late":{const p=pickOf(x);return x.lw_gate===true&&p!=null&&p>RD10;}
+    case "any":  return x.lw_gate===true;
+    case "rush": return viaHas(x,/rush/i);
+    case "pc":   return viaHas(x,/play-?caller/i);
+    // Only QBs measured on BOTH paths and failing both. "Not enough data" is not a miss.
+    case "miss": return x.lw_gate===false;
+    default:     return true;
+  }
+}
+const LWNOTE={
+  late:`clear one of the two paths and go after pick ${RD10} — Round 10 in a ${TEAMS}-team league, which is the range Heath's finding is stated for`,
+  any:"clear one of the two paths, at any draft cost",
+  rush:"clear the rushing path (100+ carry pace)",
+  pc:"play for a McShanahan-tree play-caller",
+  miss:"were measured on both paths and cleared neither",
+};
+/* What the QBs BELOW the line have in common — the negation of the mode, spelled out
+   rather than left as "the others". On a board where nothing is removed, the line is
+   the only thing telling you which half you're reading. */
+const LWSEP={
+  late:`Below the line — go inside pick ${RD10}, clear neither path, or aren't priced`,
+  any:"Below the line — clear neither path, or aren't measured on both",
+  rush:"Below the line — not on a 100+ carry pace",
+  pc:"Below the line — not a McShanahan-tree play-caller",
+  miss:"Below the line — clear at least one path, or aren't measured on both",
+};
+
 /* --- images -------------------------------------------------------------
    Logos and headshots come from ESPN's image CDN. Nothing here is load-bearing:
    if a request fails (offline, 404, blocked), onerror swaps in the text the
@@ -1007,10 +1090,16 @@ function wirePanel(root){
 
 function refresh(){
   const q=($("#search").value||"").trim().toLowerCase();
-  const rows=DATA.qbs.map(x=>{x._p=projOf(x);return x;}).filter(x=>!q||x.name.toLowerCase().includes(q));
+  const rows=DATA.qbs.map(x=>{x._p=projOf(x);x._lw=lwMatch(x);return x;}).filter(x=>!q||x.name.toLowerCase().includes(q));
   const all=DATA.qbs.slice().sort((a,b)=>b._p-a._p);
   const replPts=all.length?all[Math.min(REPL,all.length-1)]._p:0;
   rows.sort(sortCmp(sortMode));
+  // Matches float to the top. Array.sort is stable, so whichever sort you picked above
+  // still holds inside each group: the filter reorders the board without overruling it.
+  if(lwMode!=="all")rows.sort((a,b)=>(b._lw?1:0)-(a._lw?1:0));
+  const nlw=rows.filter(x=>x._lw).length;
+  $("#lwcount").innerHTML=lwMode==="all"?"":
+    `<b>${nlw}</b> of ${rows.length} ${LWNOTE[lwMode]}. The rest stay on the board, dimmed.`;
   tiers(all);
   const maxP=Math.max(...DATA.qbs.map(x=>x._p),1);
   // Which panels are open right now. The tbody is rebuilt from scratch on every
@@ -1019,11 +1108,17 @@ function refresh(){
   // and the comps re-sort under it.
   const wasOpen=new Set([...document.querySelectorAll("tr.detail")]
     .filter(d=>d.style.display!=="none").map(d=>d.dataset.for));
+  let dimSeen=false;   // the first non-match gets the labelled divider above it
   $("#tbody").innerHTML=rows.map((x)=>{
     const rank=all.indexOf(x)+1, vor=x._p-replPts, w=Math.max(2,Math.round(90*x._p/maxP));
     const isOpen=wasOpen.has(String(x.rank));
+    const dim=lwMode!=="all"&&!x._lw, edge=dim&&!dimSeen; if(dim)dimSeen=true;
     x._vor=vor;
-    return `<tr class="row${isOpen?" open":""}" data-id="${x.rank}">
+    // The divider is its own row, deliberately without class "row" — that selector is
+    // what binds the click-to-open handler below, so a separator can never be clicked
+    // open into a panel it has no QB for.
+    return (edge?`<tr class="lwsep"><td colspan="${NCOL}">${LWSEP[lwMode]}</td></tr>`:"")+
+      `<tr class="row${isOpen?" open":""}${dim?" dim":""}${edge?" edge":""}" data-id="${x.rank}">
       <td class="rank num">${rank}</td>
       <td class="qb"><b>${x.name}</b>${teamCell(x.team)}
         <span class="archtag">${x.archetype||""}</span>${x.mover?'<span class="move">NEW</span>':''}${valueTag(x)}</td>
@@ -1061,6 +1156,7 @@ function header(){
 }
 $("#search").oninput=refresh;
 $("#sortsel").onchange=e=>{sortMode=e.target.value;refresh();};
+$("#lwsel").onchange=e=>{lwMode=e.target.value;refresh();};
 // inject one "<Platform> ADP" sort option per platform, before the Floor option
 (function(){const anchor=[...$("#sortsel").options].find(o=>o.value==="floor");
   PLATS.forEach(p=>{const o=document.createElement("option");o.value=p;o.textContent=(PLABEL[p]||p)+" ADP";
