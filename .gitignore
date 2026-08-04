@@ -1,16 +1,15 @@
-# Cached nflverse pulls, trained models, and generated outputs are all
-# reproducible from code, so we don't commit them.
-data/raw/
-data/processed/
+# Trained models and generated pages are reproducible, so they don't belong in
+# version control.
 models/
 outputs/
 
-# BUT keep the hand-maintained inputs — the site needs these and they can't
-# be re-pulled from nflverse.
-!data/adp.csv
-!data/win_totals.csv
-!data/adp_history.csv
-!data/playcallers.csv
+# Same for the downloaded nflverse cache -- it's big and it re-downloads itself.
+# The hand-kept CSVs are the exception: draft prices, play-callers and win
+# totals are typed once and are the ONLY numbers the website's builder can't
+# fetch for itself. If these don't get committed, the live site builds with no
+# prices and every player is graded against nothing.
+data/*
+!data/*.csv
 
 # Python
 __pycache__/
