@@ -5,14 +5,23 @@ Step 15 -- Refresh data/adp.csv straight from the sites. No typing.
 
 WHAT IT DOES
 
-ESPN publishes its live average draft position in a public feed. This script
-reads it, turns it into the same shape data/adp.csv already uses (one row per
-player, one column per site, each value that site's overall pick number), and
-merges it in. Columns it did not pull are left exactly as they were -- your FFC
-prices are never touched.
+It refreshes three of the four price columns for you:
 
-Sleeper and Underdog do not publish an open feed. If you ever paste one of
-their boards into a text file, this script will read it:
+    ESPN      straight from ESPN's own public feed
+    Sleeper   read off beatadp.com, which prints Sleeper's numbers in a table
+    Underdog  read off bestballteambuilder.com, same idea
+
+Everything lands in the shape data/adp.csv already uses -- one row per player,
+one column per site, each value that site's overall pick number. Columns it did
+not pull are left exactly as they were, so your FFC prices are never touched.
+
+Sleeper and Underdog do not publish a feed of their own, so those two are read
+off other people's pages. That means they can only fill in players your file
+already lists; they will never add a row. It also means a redesign at either
+site stops that one column and nothing else -- the run keeps going.
+
+If you ever want to override either one by hand, paste a board into a text file
+and this script reads it instead:
 
     data\\paste_sleeper.txt
     data\\paste_underdog.txt
@@ -33,6 +42,7 @@ import pathlib
 import re
 import shutil
 import sys
+from html.parser import HTMLParser
 
 # --- Stale-bytecode guard (important when the project lives in OneDrive) ------
 sys.dont_write_bytecode = True
@@ -166,6 +176,210 @@ def pull_espn() -> dict:
     else:
         _say("  [fail] ESPN -- reached the site but found no draft positions.")
     return out
+
+
+# ---------------------------------------------------------------------------
+# Sleeper and Underdog
+# ---------------------------------------------------------------------------
+# Neither company publishes an open feed. Sleeper's own developer documentation
+# lists no draft-position endpoint at all, and Underdog's is closed -- there is
+# simply nothing to call. What does exist is two sites that print each
+# platform's numbers in a plain HTML table, and a table is something a script
+# can read.
+#
+# Rules this code follows on purpose:
+#   * Standard library only -- no lxml, no BeautifulSoup. Those have to be
+#     compiled on a Windows ARM laptop and often refuse to install.
+#   * The column is found by its HEADING, never by counting across. If either
+#     site adds a column tomorrow, we still read the right one.
+#   * It only updates players data\\adp.csv already lists. It never invents a
+#     row, so a bad day at either site cannot pollute your file.
+#   * Any failure prints one line and returns nothing. Your board still builds
+#     off the prices already saved.
+
+SLEEPER_URL = "https://www.beatadp.com/platform-adp/sleeper/redraft/half_ppr"
+# Strict on purpose. That page also carries a Consensus column, and quietly
+# writing consensus numbers into the Sleeper column would be worse than having
+# no Sleeper numbers at all.
+SLEEPER_COLS = ("sleeper",)
+
+UNDERDOG_URL = ("https://www.bestballteambuilder.com/"
+                "underdog-best-ball-average-draft-position")
+# That whole page is Underdog, so a plain "ADP" heading is safe there.
+UNDERDOG_COLS = ("underdog", "underdog adp", "adp")
+
+_NAME_HEADERS = {"player", "players", "name", "player name"}
+_BLANK_CELLS = {"", "-", "--", "---", "—", "–", "n/a", "na", "none"}
+
+HTTP_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/126.0 Safari/537.36"),
+    "Accept": "text/html,application/xhtml+xml",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+class _TableReader(HTMLParser):
+    """Pull every <table> out of a page as plain lists of cell text."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tables = []
+        self._table = None
+        self._row = None
+        self._cell = None
+        self._depth = 0
+        self._mute = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self._mute += 1
+            return
+        if tag == "table":
+            self._depth += 1
+            if self._depth == 1:
+                self._table = []
+            return
+        if self._table is None:
+            return
+        if tag == "tr":
+            self._row = []
+        elif tag in ("td", "th"):
+            self._cell = []
+        elif tag in ("br", "div", "p") and self._cell is not None:
+            self._cell.append(" ")
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style"):
+            self._mute = max(0, self._mute - 1)
+            return
+        if tag == "table":
+            if self._depth == 1 and self._table is not None:
+                self.tables.append(self._table)
+                self._table = None
+            self._depth = max(0, self._depth - 1)
+            return
+        if self._table is None:
+            return
+        if tag in ("td", "th") and self._cell is not None:
+            if self._row is None:
+                self._row = []
+            self._row.append(re.sub(r"\s+", " ", "".join(self._cell)).strip())
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            self._table.append(self._row)
+            self._row = None
+
+    def handle_data(self, data):
+        if not self._mute and self._cell is not None:
+            self._cell.append(data)
+
+
+def _head_key(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z ]+", " ", str(text).lower())).strip()
+
+
+def _as_pick(text: str):
+    """A cell to an overall pick number, or None if it isn't one."""
+    t = str(text).replace(",", "").strip()
+    if t.lower() in _BLANK_CELLS:
+        return None
+    hit = re.search(r"\d+(?:\.\d+)?", t)
+    if not hit:
+        return None
+    try:
+        val = float(hit.group(0))
+    except ValueError:
+        return None
+    return round(val, 1) if 0 < val <= MAX_PICK else None
+
+
+def _find_columns(table, wanted) -> tuple:
+    """(header_row_index, name_col, value_col) for the first row that fits."""
+    for i, row in enumerate(table):
+        keys = [_head_key(c) for c in row]
+        value_col = next((j for j, k in enumerate(keys) if k in wanted), None)
+        if value_col is None:
+            continue
+        name_col = next((j for j, k in enumerate(keys) if k in _NAME_HEADERS), None)
+        if name_col is None:
+            # No "Player" heading. Take the first column whose cells below look
+            # like people's names rather than numbers.
+            for j in range(len(keys)):
+                body = [r[j] for r in table[i + 1:i + 12] if j < len(r)]
+                if sum(1 for c in body if _NAME_RE.fullmatch(c.strip())) >= 3:
+                    name_col = j
+                    break
+        if name_col is not None and name_col != value_col:
+            return i, name_col, value_col
+    return None, None, None
+
+
+def pull_html_adp(url: str, label: str, wanted) -> dict:
+    """{('?', normalized_name): overall_pick} from a public ADP table."""
+    try:
+        import requests
+    except ImportError:
+        _say(f"  [skip] {label} -- the 'requests' package isn't installed.")
+        _say("         Run this once, then try again:  py -m pip install requests")
+        return {}
+
+    try:
+        r = requests.get(url, headers=HTTP_HEADERS, timeout=45)
+        r.raise_for_status()
+        html = r.text
+    except Exception as exc:                                    # noqa: BLE001
+        _say(f"  [fail] {label} -- couldn't reach the site. "
+             f"{type(exc).__name__}: {exc}")
+        return {}
+
+    reader = _TableReader()
+    try:
+        reader.feed(html)
+        reader.close()
+    except Exception as exc:                                    # noqa: BLE001
+        _say(f"  [fail] {label} -- couldn't read the page. {type(exc).__name__}")
+        return {}
+
+    wanted = {_head_key(w) for w in wanted}
+    for table in sorted(reader.tables, key=len, reverse=True):
+        head_i, name_col, value_col = _find_columns(table, wanted)
+        if head_i is None:
+            continue
+        out = {}
+        for row in table[head_i + 1:]:
+            if max(name_col, value_col) >= len(row):
+                continue
+            pick = _as_pick(row[value_col])
+            if pick is None:
+                continue                    # blank cell -- leave yours alone
+            name = _clean_name(row[name_col])
+            if len(name.split()) < 2:
+                continue
+            key = adp_mod.norm(name)
+            if not key:
+                continue
+            REAL_NAMES.setdefault(key, name)
+            # '?' means "match this to whatever position that player already
+            # holds in my file". It is what keeps the scrape update-only.
+            out.setdefault(("?", key), pick)
+        if out:
+            _say(f"  [ok]   {label} -- {len(out)} players read from the page")
+            return out
+
+    _say(f"  [fail] {label} -- reached the site but couldn't find a "
+         f"{'/'.join(sorted(wanted))} column. The page layout probably changed; "
+         f"send Claude this line.")
+    return {}
+
+
+def pull_sleeper() -> dict:
+    return pull_html_adp(SLEEPER_URL, "Sleeper", SLEEPER_COLS)
+
+
+def pull_underdog() -> dict:
+    return pull_html_adp(UNDERDOG_URL, "Underdog", UNDERDOG_COLS)
 
 
 # ---------------------------------------------------------------------------
@@ -333,15 +547,15 @@ def main() -> int:
         _say(f"  Read {len(before)} existing rows from data\\adp.csv")
     _say()
 
+    # Live first. A paste file, if you ever make one, wins over the live pull
+    # for the players it names -- you only make one deliberately.
     pulls = {
         "espn": pull_espn(),
-        "sleeper": parse_paste(config.DATA_DIR / "paste_sleeper.txt", "Sleeper"),
-        "underdog": parse_paste(config.DATA_DIR / "paste_underdog.txt", "Underdog"),
+        "sleeper": {**pull_sleeper(),
+                    **parse_paste(config.DATA_DIR / "paste_sleeper.txt", "Sleeper")},
+        "underdog": {**pull_underdog(),
+                     **parse_paste(config.DATA_DIR / "paste_underdog.txt", "Underdog")},
     }
-    for name, path in (("Sleeper", "paste_sleeper.txt"),
-                       ("Underdog", "paste_underdog.txt")):
-        if not (config.DATA_DIR / path).exists():
-            _say(f"  [skip] {name} -- no data\\{path} to read (that's fine).")
 
     if not any(pulls.values()):
         _say()
