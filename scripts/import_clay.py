@@ -1,5 +1,5 @@
-"""Turn the published projection guide into data/clay_rb_<season>.csv and
-data/clay_qb_<season>.csv.
+"""Turn the published projection guide into data/clay_rb_<season>.csv,
+data/clay_qb_<season>.csv, data/clay_wr_<season>.csv and data/clay_te_<season>.csv.
 
 WHEN YOU RUN THIS: once, whenever a new guide comes out. Never as part of a
 normal build -- the model reads the CSV, not the PDF, so the PDF is not a
@@ -38,12 +38,16 @@ def _find_pdf() -> str:
 PDF = _find_pdf()
 OUT = config.DATA_DIR / f"clay_rb_{config.UPCOMING_SEASON}.csv"
 OUT_QB = config.DATA_DIR / f"clay_qb_{config.UPCOMING_SEASON}.csv"
+OUT_WR = config.DATA_DIR / f"clay_wr_{config.UPCOMING_SEASON}.csv"
+OUT_TE = config.DATA_DIR / f"clay_te_{config.UPCOMING_SEASON}.csv"
 
 # Clay's team codes -> the ones nflreadpy uses.
 TEAM = {"ARZ": "ARI", "BLT": "BAL", "CLV": "CLE", "HST": "HOU"}
 # Clay's spellings -> the ones the player file uses. Keys are already
 # normalised, so the suffix is gone by the time we look one up.
-ALIAS = {"ken walker": "kenneth walker", "kenneth gainwell": "kenny gainwell"}
+ALIAS = {"ken walker": "kenneth walker", "kenneth gainwell": "kenny gainwell",
+         "kyle t williams": "kyle williams",      # the 2025 rookie, not the 2010 one
+         "chigoziem okonkwo": "chig okonkwo"}
 
 ROW = re.compile(
     r"^(.+?)\s{2,}([A-Z]{2,3})\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(-?\d+)\s+(\d+)"
@@ -105,6 +109,101 @@ def parse_qb(pgs):
                 "carries": int(g[11]), "rush_yds": int(g[12]), "rush_td": int(g[13]),
             })
     return pd.DataFrame(out)
+
+
+def parse_skill(pgs, heading):
+    """Read any of the skill-position tables -- they all share one column layout.
+
+    Receivers and tight ends print the same fourteen columns as running backs,
+    so the row pattern is reused rather than duplicated. Clay's own Car% and
+    Targ% come along for the ride purely as a cross-check on the share maths.
+    """
+    out = []
+    for pg in pgs:
+        if not pg.lstrip().startswith(heading):
+            continue
+        for line in pg.splitlines():
+            m = ROW.match(line.strip())
+            if not m:
+                continue
+            g = m.groups()
+            out.append({
+                "name": g[0].strip(), "team": TEAM.get(g[1], g[1]),
+                "clay_rank": int(g[2]), "clay_ppr": int(g[3]), "clay_games": int(g[4]),
+                "carries": int(g[5]), "rush_yds": int(g[6]), "rush_td": int(g[7]),
+                "targets": int(g[8]), "rec": int(g[9]),
+                "rec_yds": int(g[10]), "rec_td": int(g[11]),
+                "clay_carry_pct": int(g[12]) / 100.0,
+                "clay_targ_pct": int(g[13]) / 100.0,
+            })
+    return pd.DataFrame(out)
+
+
+def _receiving_files(players, pgs):
+    """Write the receiver and tight-end files.
+
+    Target share here means share of the WHOLE passing game, not share of one
+    position group -- so the denominator is every target the guide hands out on
+    that team, backs and tight ends included. Taking it off the receiver table
+    alone would inflate every wideout by roughly a third.
+    """
+    tables = {h: parse_skill(pgs, h) for h in
+              ("Wide Receiver Projections", "Tight End Projections",
+               "Running Back Projections")}
+    wr, te, rb = tables["Wide Receiver Projections"], \
+        tables["Tight End Projections"], tables["Running Back Projections"]
+    if wr.empty:
+        print("\nno receiver page found -- skipping the WR file")
+        return
+
+    everyone = pd.concat([d for d in (wr, te, rb) if not d.empty], ignore_index=True)
+    team_targets = everyone.groupby("team")["targets"].sum()
+
+    idmap = _idmap(players, ["WR", "TE"])
+    # Two-way players are filed under their defensive position -- Travis Hunter
+    # reads CB. Anyone the receiver map misses gets a second look against every
+    # position, and the fallback is printed so a real bad match can't hide.
+    anypos = _idmap(players, sorted(
+        players.get("position", players.get("position_group")).astype(str).str.upper().unique()))
+    cols = ["player_id", "name", "team", "clay_rank", "clay_ppr", "clay_games",
+            "carries", "rush_yds", "rush_td", "targets", "rec", "rec_yds", "rec_td",
+            "clay_target_share", "clay_targ_pct", "clay_yards_share"]
+
+    team_yards = everyone.groupby("team")["rec_yds"].sum()
+    for df, label, path in ((wr, "receivers", OUT_WR), (te, "tight ends", OUT_TE)):
+        if df.empty:
+            continue
+        print(f"\nparsed {len(df)} {label}")
+        df["key"] = df["name"].map(lambda n: ALIAS.get(A.norm(n), A.norm(n)))
+        df["player_id"] = df["key"].map(idmap)
+        late = df["player_id"].isna() & df["key"].isin(anypos)
+        if late.any():
+            print("  found off the receiver list (two-way or mis-filed position): "
+                  + ", ".join(df.loc[late, "name"]))
+            df.loc[late, "player_id"] = df.loc[late, "key"].map(anypos)
+        print(f"matched {df['player_id'].notna().sum()} of {len(df)} to a player id")
+        miss = df[df["player_id"].isna()]
+        if len(miss):
+            print("  unmatched:", ", ".join(f"{r['name']} ({r.team}, {r.clay_rank})"
+                                            for _, r in miss.iterrows()))
+        df["clay_target_share"] = (df["targets"] / df["team"].map(team_targets)).round(4)
+        df["clay_yards_share"] = (df["rec_yds"] / df["team"].map(team_yards)).round(4)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        df[cols].to_csv(path, index=False, quoting=csv.QUOTE_MINIMAL)
+        print(f"wrote {path}  ({len(df)} rows)")
+
+        # Clay rounds his own percentage to a whole point, so agreement inside
+        # one point is the most the check can ask for. A bigger gap would mean
+        # the denominator is wrong -- a missing position table, most likely.
+        gap = (df["clay_target_share"] - df["clay_targ_pct"]).abs()
+        print(f"  share check vs Clay's printed %: worst gap {gap.max():.3f}, "
+              f"{(gap <= 0.011).mean():.0%} inside a rounding point")
+
+        short = df[df["clay_games"] < 17].sort_values("clay_rank")
+        print(f"  {label} the guide does not give a full season:"
+              if len(short) else f"  every one of the {label} is down for a full season")
+        for _, r in short.iterrows():
+            print(f"    {r.clay_rank:<4d} {r['name']:24s} {r.team:4s} {r.clay_games} games")
 
 
 def _idmap(players, wanted):
@@ -186,6 +285,7 @@ def main():
         print(f"  RB{r.clay_rank:<4d} {r['name']:24s} {r.team:4s} {r.clay_games} games")
 
     main_qb(players)
+    _receiving_files(players, pages(PDF))
 
 
 if __name__ == "__main__":
