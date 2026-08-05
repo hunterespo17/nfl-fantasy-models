@@ -1,23 +1,39 @@
-# HOW MANY GAMES YOU THINK A RUNNING BACK ACTUALLY PLAYS
+# WHO IS HURT
 #
-# This is the one place you can tell the board about an injury. Open it in
-# Notepad (not Excel, or Excel will eat the # lines), add a row, save, and run
-# PUBLISH MY BOARD. Anything you put here beats what the outside guide says.
+# Everybody on the board is projected for all 17 games. This file is the ONLY
+# way that changes. Open it in Notepad (not Excel -- Excel will eat the # lines),
+# add a row, save, and run PUBLISH MY BOARD.
+#
+# Only "player" is required. Fill in whatever you actually know and leave the
+# rest blank:
 #
 #   player           exactly how the name reads on the board
-#   expected_games   0 to 17. Leave a back out entirely if he's fine.
-#   note             shows up on his row on the site. Keep it short.
+#   expected_games   0 to 17, if you have a number in mind
+#   injury           what's wrong with him -- plain English, see the list below
+#   back_week        the week you think he's back. 1 = opening week
+#   note             shows on his row on the site. Keep it short
 #
-# THE NUMBER IS TAKEN AT FACE VALUE. Put 11 and he is priced as 11 games, full
-# stop. It used to hedge him up to about 13, and that was wrong: the season runs
-# September to January, so 11 games means six real weeks are already gone, not a
-# soft August return date to argue with. Softening it also bets the wrong way --
-# the best case is capped at 17 while the bad case runs to injured reserve.
+# THE SEASON STARTS IN SEPTEMBER. "Back in eight weeks" from a June operation
+# means he misses nothing. The same eight weeks from a camp injury costs him a
+# month. That is what back_week is for, and it's usually the easiest to answer.
+#
+# You don't have to guess a games number. Type just the injury and the model
+# works it out from what players have really done coming off that injury, using
+# published NFL recovery research (the studies are cited in src\availability.py).
+# If you DO give a number, yours counts most, then the injury, then Mike Clay.
+#
+# Words the injury column knows -- write it how you'd say it out loud:
+#
+#   acl, mcl, meniscus, knee, achilles, high ankle, ankle, lisfranc, turf toe,
+#   foot, jones fracture, broken leg, hamstring, calf, quad, groin, sports
+#   hernia, hip, shoulder, labrum, ac joint, collarbone, pec, hand, thumb,
+#   wrist, concussion, back, neck, ribs
+#
+# Anything else still works -- it just gets a generic injury instead of a
+# specific one. Delete a row when he's healthy again. An empty file is fine.
 #
 # ONLY PUT INJURIES HERE. "Third on the depth chart" is not an injury, and the
 # board already knows it from the depth chart. Type a backup in at six games and
 # you charge him twice for the same thing.
-#
-# Delete a row when a back is healthy again. An empty file is fine.
-player,expected_games,note
-Zach Charbonnet,11,knee -- may not be ready for week one
+player,expected_games,injury,back_week,note
+Zach Charbonnet,11,knee,,knee -- may not be ready for week one

@@ -82,11 +82,33 @@ def build_rankings(
     df = projections.copy()
     df = df[df["position"].isin(config.FANTASY_POSITIONS)].copy()
 
+    full = float(league.get("games_per_season", 17))
     if games_col not in df.columns:
-        df[games_col] = league.get("games_per_season", 17)
-    df["proj_points_total"] = df[ppg_col] * df[games_col]
+        df[games_col] = full
+    df[games_col] = df[games_col].astype(float).fillna(full).clip(0.0, full)
 
     repl = replacement_ranks(league)
+
+    # A player expected for eleven games does not score nothing in the other
+    # six -- you start somebody else, and this board already prices somebody
+    # else: he is the free agent every VOR number below is measured against.
+    # So the weeks a hurt player misses are worth replacement, not zero.
+    # Charging them at zero drops a real top-twenty back below a fullback,
+    # which is correct arithmetic to the wrong question.
+    #
+    # Replacement is read off the PER-GAME order, never the season order, so it
+    # can't depend on the very fill it's being used for. And the fill is capped
+    # at the player's own rate, so missing games can never help anybody.
+    fill = pd.Series(0.0, index=df.index)
+    for pos, sub in df.groupby("position"):
+        rates = np.sort(sub[ppg_col].astype(float).to_numpy())[::-1]
+        if not len(rates):
+            continue
+        r = min(max(int(repl.get(pos, len(rates))), 1), len(rates))
+        fill.loc[sub.index] = np.minimum(float(rates[r - 1]), sub[ppg_col].astype(float))
+
+    df["proj_points_total"] = (df[ppg_col] * df[games_col]
+                               + fill * (full - df[games_col]))
 
     frames = []
     for pos, sub in df.groupby("position"):

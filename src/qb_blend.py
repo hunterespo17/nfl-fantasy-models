@@ -522,10 +522,20 @@ def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
             "vor": round(float(r["vor"]), 1),
             "career_games": (round(float(row["career_games"])) if pd.notna(row.get("career_games")) else None),
             "age": (round(float(row["age"])) if pd.notna(row.get("age")) else None),
+            # How long a body with his history normally lasts, and that as a
+            # 0-to-1 worry score. These do NOT cut his games -- he is projected
+            # for a full season like everybody else. They drive his RISK rating,
+            # which is where an injury history belongs. This split is the whole
+            # reason Burrow can be a full-season projection and a scary pick.
+            "avail_games": (round(float(row["avail_games"]), 1)
+                            if pd.notna(row.get("avail_games")) else None),
+            "avail_risk": (round(float(row["avail_risk"]), 2)
+                           if pd.notna(row.get("avail_risk")) else None),
             # How much of the season we expect to get, why, and where an outside
-            # guide has him. The page reads all three straight off the row.
+            # guide has him. Seventeen unless somebody reported something.
             "games": round(float(row.get("proj_games", 17.0)), 1),
             "games_note": (str(row.get("games_note") or "") or None),
+            "injury": (str(row.get("injury") or "") or None),
             "clay_rank": (int(row["clay_rank"]) if pd.notna(row.get("clay_rank")) else None),
             # Explicit numeric fields (not just SIGNALS, which is label-keyed) so
             # ratings.py can test the published rushing thresholds directly.

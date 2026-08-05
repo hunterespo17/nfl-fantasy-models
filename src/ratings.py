@@ -346,28 +346,36 @@ def _flags(payload: list, pos: str, S: dict) -> None:
             elif eff <= 25:
                 dn.append(["down", "Inefficient"])
 
-            # Last season's games per 17, NOT the Availability index -- that index
-            # is age times durability, so reading it here would flag every healthy
-            # older back as hurt and double-count the age chip above. The bar is
-            # six missed games, which nobody argues with.
-            dur = q.get("durability")
-            if dur is not None and dur <= 0.65:
-                dn.append(["warn", "Missed time"])
+            # HIS AVAILABILITY RECORD. Three seasons of games plus the size of
+            # last year's job, NOT the Availability index -- that index is age
+            # times durability, so reading it here would flag every healthy older
+            # back as hurt and double-count the age chip above.
+            #
+            # This chip carries real weight now, because it is the ONLY place a
+            # thin injury history shows up. Every back on this board is projected
+            # for a full seventeen games; a man who has never once come close to
+            # that is a full-season projection with a warning on it, and this is
+            # the warning. See src/availability.py for why it works that way.
+            hurt = q.get("avail_risk")
+            if hurt is not None and hurt >= 0.60:
+                dn.append(["warn", "Rarely makes it through a year"])
+            elif hurt is not None and hurt >= 0.35:
+                dn.append(["warn", "Misses games most years"])
             if q.get("mover"):
                 dn.append(["warn", "New team"])
 
-            # Somebody has REPORTED that he'll miss time this year, which is a
-            # different claim from "missed time last year" above and is the one
-            # that moves his rank. It goes to the front of the down list because
-            # it is the single most important thing on the row when it's true.
-            #
-            # The test is the note, not the games count. Every back's expected
-            # games now sits under seventeen, because that is what backs actually
-            # play -- flagging on the number alone would hang a warning chip on
-            # all hundred rows and the chip would stop meaning anything.
-            gm = q.get("games")
+            # Somebody has REPORTED something about him THIS year, which is a
+            # completely different claim from the history above: one says a body
+            # like his tends to break, this one says he is hurt right now. It is
+            # the only thing that moves his games count, so it goes to the front
+            # of the down list -- when it's true it's the most important thing on
+            # the row. Name the injury when we know it; "coming off an ACL" tells
+            # you more than "only 11 games" ever could.
+            gm, inj = q.get("games"), q.get("injury")
             if q.get("games_note") and gm is not None:
-                dn.insert(0, ["warn", f"Only {round(float(gm))} games"])
+                txt = (f"{inj}, ~{round(float(gm))} games" if inj
+                       else f"Only {round(float(gm))} games")
+                dn.insert(0, ["warn", txt])
             if q.get("rookie"):
                 dn.insert(0, ["warn", "Rookie -- no NFL games"])
 
@@ -408,15 +416,32 @@ def _flags(payload: list, pos: str, S: dict) -> None:
             f.append(["warn", "New team"])
         if age is not None and age >= old_age:
             f.append(["down", f"Age {age}"])
-        # Somebody has REPORTED he'll miss time this year -- a different claim
-        # from any of the career reads above, and the one that actually moves his
-        # rank. It goes to the front so it can't be trimmed off a busy row. The
-        # test is the note rather than the games count, because every passer's
-        # expected games now sits under seventeen and flagging on the number
-        # alone would chip every row on the board.
-        gm = q.get("games")
+
+        # HIS AVAILABILITY RECORD -- three seasons of games plus the size of last
+        # year's job. This matters more at quarterback than anywhere else on the
+        # board: you start one of them, so a passer who misses six weeks doesn't
+        # cost you a share of a backfield, he empties the position.
+        #
+        # It goes near the front because it is now the ONLY place a thin injury
+        # history appears. Burrow and Daniels are projected for a full seventeen
+        # games like everybody else -- correctly, since nobody has reported a
+        # thing about either of them -- and this is what stops that reading as a
+        # clean bill of health. See src/availability.py.
+        hurt = q.get("avail_risk")
+        if hurt is not None and hurt >= 0.60:
+            f.insert(0, ["warn", "Rarely makes it through a year"])
+        elif hurt is not None and hurt >= 0.35:
+            f.insert(0, ["warn", "Misses games most years"])
+
+        # Somebody has REPORTED something about him THIS year -- a different
+        # claim from the history above, and the only one that moves his games
+        # count. Front of the row so a busy card can't trim it off. Name the
+        # injury when we know it, because "coming off an ACL" carries more than a
+        # bare number does.
+        gm, inj = q.get("games"), q.get("injury")
         if q.get("games_note") and gm is not None:
-            f.insert(0, ["warn", f"Only {round(float(gm))} games"])
+            f.insert(0, ["warn", (f"{inj}, ~{round(float(gm))} games" if inj
+                                  else f"Only {round(float(gm))} games")])
         q["flags"] = f[:6]
 
 
@@ -486,12 +511,30 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
         q["value_by_platform"] = {pf: (pranks[pf][k] - q["rank"])                   # +: falls past model
                                   for pf in plats if k in pranks.get(pf, {})}
 
+    # ---- FLOOR IS A SEASON, NOT A GAME ------------------------------------
+    # `floor_pts` is a bad WEEK -- the 25th-percentile game he turns in. That is
+    # the right number to print, and the wrong one to bucket on by itself, because
+    # the other way a season goes wrong is that he is not out there. Every player
+    # is projected for a full seventeen now (see src/availability.py), so a thin
+    # availability record has to show up somewhere or it vanishes entirely, and
+    # the floor is exactly where it belongs: it is the definition of a floor.
+    #
+    # So the BUCKET reads a bad week discounted by how long a body like his
+    # normally lasts, while the printed floor stays the honest per-game number.
+    # A quarterback whose last three seasons say ten games keeps his projection
+    # and reads Risky, which is the whole point of the split.
+    for q in payload:
+        fp = q.get("floor_pts")
+        ag = q.get("avail_games")
+        q["_fseason"] = (None if fp is None else
+                         float(fp) * (min(float(ag), 17.0) / 17.0 if ag else 1.0))
+
     # pool-relative floor & ceiling buckets
-    _tertile(payload, "floor_pts", ["Risky", "Moderate", "Safe"], "floor_bucket")
+    _tertile(payload, "_fseason", ["Risky", "Moderate", "Safe"], "floor_bucket")
     _tertile(payload, "_cscore", ["Low", "Medium", "High"], "ceiling_bucket")
 
     # risk at ADP
-    _pctl(payload, "floor_pts", "_fpct")
+    _pctl(payload, "_fseason", "_fpct")
     _pctl(payload, "_cscore", "_cpct")
     for q in payload:
         apr = q.get("adp_pos_rank")
@@ -505,9 +548,20 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
         downside = 1 - q["_fpct"]        # weak floor
         no_upside = 1 - q["_cpct"]       # thin ceiling (a high ceiling forgives a lot)
         reach = min(max((q["rank"] - apr) / S["reach"], 0.0), 1.0)       # going ahead of the model
+        # Availability gets its own term rather than only leaking in through the
+        # floor above, because it is a different failure. A weak floor means his
+        # bad weeks are bad; this means there may not be a week at all. It is the
+        # column that carries a player's injury history now that his projection
+        # no longer does, so it is weighted to be felt -- a quarterback the fit
+        # says lasts ten games gives up about a quarter of the available risk
+        # score before anything else is counted.
+        hurt = float(q.get("avail_risk") or 0.0)
         # A premium pick is risky when it's shaky (weak floor AND/OR no ceiling to
-        # justify it) or a reach past the model. High ceiling meaningfully offsets.
-        q["_risk"] = cost * (0.40 * downside + 0.25 * no_upside + 0.35 * reach)
+        # justify it), a reach past the model, or unlikely to be on the field.
+        # High ceiling meaningfully offsets. Cheap picks stay low-risk by
+        # definition -- you cannot be hurt by a pick you did not spend.
+        q["_risk"] = cost * (0.30 * downside + 0.19 * no_upside
+                             + 0.26 * reach + 0.25 * hurt)
         vg = apr - q["rank"]                     # +: falls past where model ranks him = value
         q["value_gap"] = int(vg)
         bar = S["gap_bar"]
@@ -516,7 +570,7 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
     _risk_buckets(payload)
 
     for q in payload:                            # drop internal temporaries
-        for t in ("_cscore", "_games", "_fpct", "_cpct", "_risk"):
+        for t in ("_cscore", "_games", "_fpct", "_cpct", "_risk", "_fseason"):
             q.pop(t, None)
 
     # ---- VALUE IN POINTS, not in draft slots -------------------------------

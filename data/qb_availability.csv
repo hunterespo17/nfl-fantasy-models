@@ -1,24 +1,40 @@
-# HOW MANY GAMES YOU THINK A QUARTERBACK ACTUALLY PLAYS
+# WHO IS HURT
 #
-# Same file as data\rb_availability.csv, same rules, for the QB board. Open it in
-# Notepad (not Excel, or Excel will eat the # lines), add a row, save, and run
-# PUBLISH MY BOARD. Anything you put here beats what the outside guide says.
+# Same file as data\rb_availability.csv, same rules, for the QB board.
+# Everybody is projected for all 17 games. This file is the ONLY way that
+# changes. Open it in Notepad (not Excel), add a row, save, and run PUBLISH MY
+# BOARD.
+#
+# Only "player" is required. Fill in whatever you actually know:
 #
 #   player           exactly how the name reads on the board
-#   expected_games   0 to 17. Leave a QB out entirely if he's fine.
-#   note             shows up on his row on the site. Keep it short.
+#   expected_games   0 to 17, if you have a number in mind
+#   injury           what's wrong with him -- plain English, see the list below
+#   back_week        the week you think he's back. 1 = opening week
+#   note             shows on his row on the site. Keep it short
 #
-# THE NUMBER IS TAKEN AT FACE VALUE. Put 12 and he is priced as 12 games. The
-# season runs September to January, so 12 means five real weeks are gone.
+# THE SEASON STARTS IN SEPTEMBER. "Back in eight weeks" from a June operation
+# means he misses nothing. Same eight weeks from a camp injury costs him a
+# month. That's what back_week is for -- usually the easiest one to answer.
 #
-# ONLY PUT INJURIES HERE. "Probably loses the job in November" is not an injury.
-# A benching is a job question and belongs in the depth chart, not here.
+# You don't have to guess a games number. Type just the injury and the model
+# works it out from published NFL recovery research (cited in the code). Where
+# the research says the position matters, it's used: a quarterback coming off a
+# knee is a far better bet than a running back coming off the same knee -- 93%
+# of passers get back and lose almost nothing, against half of everyone else.
 #
-# Right now this file is empty on purpose -- the guide has every starting
-# quarterback down for a full season, and I'm not going to invent an injury
-# nobody has reported. Add a line the first time one gets hurt:
+# Words the injury column knows -- write it how you'd say it out loud:
 #
-#   Joe Burrow,12,thumb -- expected back in October
+#   acl, mcl, meniscus, knee, achilles, high ankle, ankle, lisfranc, turf toe,
+#   foot, broken leg, hamstring, calf, quad, groin, hip, shoulder, labrum,
+#   ac joint, collarbone, pec, hand, thumb, wrist, concussion, back, neck, ribs
+#
+# Right now this file is empty on purpose -- nobody has reported an injury to a
+# starting quarterback, so nobody gets docked. Burrow and Daniels are NOT in
+# here, and that is correct: their injury history shows up as a risk warning on
+# their card, not as a smaller season. Add a line the first time one gets hurt:
+#
+#   Joe Burrow,,thumb,5,thumb -- expected back in October
 #
 # Delete a row when he's healthy again. An empty file is fine.
-player,expected_games,note
+player,expected_games,injury,back_week,note

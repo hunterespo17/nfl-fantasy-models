@@ -968,6 +968,41 @@ function ptsAt(c){return ptsAtK(c,KN,A,B);}
 function slopeAt(c){return (ptsAt(c+0.5)-ptsAt(c-0.5));}
 function projOf(q){return ptsAt(composite(q));}
 
+/* --- availability ---------------------------------------------------------
+   projOf is a RATE: what he scores in a game he plays. A draft board is a
+   season, so a back expected to miss a month is worth less than his rate says
+   even though his rate hasn't changed. `games` comes from the model -- 17 for
+   everyone there's no news about, less for anyone there is -- and a board that
+   doesn't publish it at all (a WR or TE board built before this existed) has to
+   read as a full season, or every back would sink against every quarterback on
+   the combined board for no reason at all. */
+function availOf(q){const g=q&&q.games; return g==null?1:Math.max(0.2,Math.min(1,g/17));}
+/* The weeks he misses are NOT worth nothing. You start somebody else, and this
+   board already prices somebody else at every position -- he is the free agent
+   the Over-replacement column measures everyone against. So a back down for six
+   weeks loses the gap between him and that guy, not six whole games. Charging
+   the missing weeks at zero is what drops a real top-twenty back below a
+   fullback: correct arithmetic, wrong question.
+   Capped at his own rate, so missing games can never help anybody. */
+function replRate(pos){
+  const qs=((SITE.boards[pos]||{}).qbs)||[];
+  if(!qs.length) return 0;
+  const ctx=ctxFor(pos);
+  const rates=qs.map(x=>rateIn(x,ctx)).sort((a,b)=>b-a);
+  return rates[Math.min(replIndex(pos),rates.length-1)];
+}
+/* Only ever runs for somebody who is actually missing time -- one or two rows
+   on a hundred-row board -- so walking the board to find replacement is cheap. */
+function blendAvail(rate,q,pos){
+  const a=availOf(q);
+  return a>=1?rate:rate*a+Math.min(replRate(pos),rate)*(1-a);
+}
+/* What the board sorts on: the rate, discounted for the games we don't expect
+   to get, with those games credited at replacement. Same units as projOf, so
+   replacement level, VOR and the tier gaps all keep meaning exactly what they
+   meant before this existed. */
+function valOf(q){return blendAvail(projOf(q),q,POS);}
+
 /* --- pricing a player on a board that isn't the one on screen -------------
    Same arithmetic as composite()/projOf(), with the board handed in instead of
    read off the page. The Big Board needs it: every position keeps its own
@@ -980,11 +1015,13 @@ function ctxFor(pos){
   const gs=(bd.groups&&bd.groups.length)?bd.groups:Object.keys(bd.weights||{});
   return {pos, bd, w:weightsFor(pos), gs, a:cal.a??0, b:cal.b??0.25, kn:cal.knots||[]};
 }
-function projIn(x,ctx){
+/* His rate on a board that isn't the one on screen, before availability. */
+function rateIn(x,ctx){
   const s=ctx.gs.reduce((t,g)=>t+(ctx.w[g]||0),0)||1;
   const c=ctx.gs.reduce((t,g)=>t+(ctx.w[g]||0)*(x.indices[g]??50),0)/s;
   return ptsAtK(c,ctx.kn,ctx.a,ctx.b);
 }
+function projIn(x,ctx){return blendAvail(rateIn(x,ctx),x,ctx.pos);}
 
 function weightBars(){
   const s=sumW();
@@ -1023,8 +1060,8 @@ function replIndex(pos){   // 0-based index of the first unstartable player
   const rm=(SITE.boards[pos]||{}).ratings_meta||{};
   return Math.max(0,(rm.repl_rank||12)-1);
 }
-function tiers(sorted){ // gap-based on proj
-  const v=sorted.map(q=>q._p); if(v.length<2){sorted.forEach(q=>q._tier=1);return;}
+function tiers(sorted){ // gap-based on the same value the board is ranked by
+  const v=sorted.map(q=>q._v??q._p); if(v.length<2){sorted.forEach(q=>q._tier=1);return;}
   const d=[];for(let i=1;i<v.length;i++)d.push(v[i-1]-v[i]);
   const mean=d.reduce((a,x)=>a+x,0)/d.length, sd=Math.sqrt(d.reduce((a,x)=>a+(x-mean)**2,0)/d.length);
   let t=1;sorted[0]._tier=1;for(let i=1;i<v.length;i++){if(d[i-1]>mean+sd)t++;sorted[i]._tier=t;}
@@ -1163,7 +1200,13 @@ function styleLabel(x){
   if(POS==="RB"&&x.bf_share!=null)return `${Math.round(x.bf_share*100)}% of backfield`;
   return "";
 }
-function edgeFpg(x){return x.exp_fpg==null?null:projOf(x)-x.exp_fpg;}
+/* valOf, not projOf, and the difference matters exactly once: on a back the
+   market has already marked down for an injury. His PRICE is cheap because of
+   the knee, so scoring his undiscounted rate against that cheap price would
+   hand him a "League winner" chip for being hurt -- on the same row where we
+   just dropped him fifteen spots for it. What the pick is worth is the rate
+   times the season we expect to get. Everybody healthy is unaffected. */
+function edgeFpg(x){return x.exp_fpg==null?null:valOf(x)-x.exp_fpg;}
 function edgeTag(v){return v==null?null:v>=LWB.fpg?"League winner":v>=LWB.value_fpg?"Value":v<=-LWB.value_fpg?"Pricey":null;}
 function flagChips(x){
   const f=(x.flags||[]).slice(), e=edgeFpg(x);
@@ -1185,8 +1228,15 @@ function valuePointsLine(o){
   const basis=CURVE&&CURVE.source==="board"
     ?`vs the ${fmt(o.exp_fpg,1)} this year's price curve implies at that cost`
     :`vs the ${fmt(o.exp_fpg,1)} ${POSPL} drafted around here have actually averaged`;
+  /* Print the same number the edge was computed from, or the sentence stops
+     adding up. On everyone healthy that IS the projection; on a back we expect
+     to miss time it's the projection after the discount, and the parenthetical
+     says so rather than leaving him looking mis-rounded. */
+  const v=valOf(o), p=projOf(o);
+  const adj=Math.abs(v-p)>=0.05
+    ?` <span style="color:var(--muted)">(${fmt(p,1)} in the games he plays)</span>`:"";
   return `${bdg(tag||"Fair price",cls)} <b>${sign}${fmt(e,1)} pts/gm</b>
-    <span style="color:var(--muted)">— ${fmt(projOf(o),1)} projected ${basis}</span>${src}`;
+    <span style="color:var(--muted)">— ${fmt(v,1)} projected ${basis}</span>${adj}${src}`;
 }
 /* The checklist is intentionally NOT folded into the projection. "Will he score
    points" and "does he have the shape that wins leagues" are different
@@ -1308,9 +1358,39 @@ function riskWhy(o){
   if(o.value_gap!=null&&o.value_gap<=-5)b.push("going ahead of the model");
   return (o.risk_bucket==="High"?"expensive, with ":"some cost, with ")+(b.length?b.join(", "):"only modest upside");
 }
+/* --- How much of the season do we think we get? ---------------------------
+   Three separate things, and they only appear when there's something to say:
+   how many of the 17 the board is paying for and why, whether he's a rookie
+   with no NFL games behind the number, and where an outside guide has him.
+   That last one is a sanity check, not an input -- if this board and a
+   published guide disagree by thirty spots on a back, one of us is wrong and
+   you should want to know before you spend a pick. */
+function gamesLine(o){
+  const g=o.games, out=[];
+  if(g!=null&&g<16.5){
+    const why=o.games_note?` <span style="color:var(--muted)">— ${o.games_note}</span>`:"";
+    out.push(`<div class="ovh">Games we expect</div><div><b>${fmt(g,1)} of 17</b>${why}
+      <div style="color:var(--muted);margin-top:2px">His per-game number is unchanged. He's ranked lower because a
+      pick buys a season, and we don't expect to get all of this one.</div></div>`);
+  }
+  if(o.rookie){
+    out.push(`<div class="ovh">Rookie</div><div><span style="color:var(--muted)">No NFL games behind him yet, so he's
+      ranked on the size of his job plus an outside projection rather than on a box score. Treat the number as a
+      placeholder with a real job attached, not as a read on the player.</span></div>`);
+  }
+  if(o.clay_rank!=null){
+    const mine=o._rank||null;
+    const d=mine?Math.abs(mine-o.clay_rank):null;
+    const verdict=d==null?"":d<=8?" — in line with this board"
+      :` — <span style="color:var(--neg)">${d} spots off this board</span>`;
+    out.push(`<div class="ovh">Outside guide</div><div>${POS}${o.clay_rank}${verdict}</div>`);
+  }
+  return out.join("");
+}
 function overlays(o){
   return `<div class="ov" style="margin:2px 0 16px">
     <div class="ovh">Draft slot (ADP)</div><div>${adpTable(o)}</div>
+    ${gamesLine(o)}
     ${platEdgeLine(o)}
     <div class="ovh">Worth the pick?</div><div>${valuePointsLine(o)}</div>
     ${(o.lw_checks&&o.lw_checks.length)
@@ -1325,16 +1405,21 @@ const SORD={Safe:3,Moderate:2,Risky:1,High:3,Medium:2,Low:1};
 const RORD={High:3,Moderate:2,Low:1};
 const pfr=(x,pf)=>(x.adp_platforms&&x.adp_platforms[pf])||999;
 function sortCmp(m){
-  if(PLATS.includes(m))return (a,b)=>(pfr(a,m)-pfr(b,m))||(b._p-a._p);
+  /* Every one of these ends up comparing _v, not _p -- the value the board is
+     ranked on, so the order you're looking at always agrees with the rank
+     numbers beside it. The Proj column still prints the RATE, which is why a
+     back expected to miss time can show a bigger number than the man above
+     him; his row says how many games we expect. */
+  if(PLATS.includes(m))return (a,b)=>(pfr(a,m)-pfr(b,m))||(b._v-a._v);
   return ({
-  proj:(a,b)=>b._p-a._p,
-  adp:(a,b)=>((a.adp_pos_rank||999)-(b.adp_pos_rank||999))||(b._p-a._p),
-  market:(a,b)=>((a._market||999)-(b._market||999))||(b._p-a._p),
-  value:(a,b)=>{const ga=platEdge(a).gap,gb=platEdge(b).gap;return ((gb==null?-99:gb)-(ga==null?-99:ga))||(b._p-a._p);},
+  proj:(a,b)=>b._v-a._v,
+  adp:(a,b)=>((a.adp_pos_rank||999)-(b.adp_pos_rank||999))||(b._v-a._v),
+  market:(a,b)=>((a._market||999)-(b._market||999))||(b._v-a._v),
+  value:(a,b)=>{const ga=platEdge(a).gap,gb=platEdge(b).gap;return ((gb==null?-99:gb)-(ga==null?-99:ga))||(b._v-a._v);},
   floor:(a,b)=>((SORD[b.floor_bucket]||0)-(SORD[a.floor_bucket]||0))||((b.floor_pts||0)-(a.floor_pts||0)),
   ceiling:(a,b)=>((SORD[b.ceiling_bucket]||0)-(SORD[a.ceiling_bucket]||0))||(((b.boom25||0)+(b.boom30||0))-((a.boom25||0)+(a.boom30||0))),
-  risk:(a,b)=>((RORD[b.risk_bucket]||0)-(RORD[a.risk_bucket]||0))||(b._p-a._p),
-})[m]||((a,b)=>b._p-a._p);}
+  risk:(a,b)=>((RORD[b.risk_bucket]||0)-(RORD[a.risk_bucket]||0))||(b._v-a._v),
+})[m]||((a,b)=>b._v-a._v);}
 let sortMode="proj";
 
 /* --- the league-winner filter --------------------------------------------
@@ -1581,9 +1666,15 @@ function wirePanel(root){
 
 function refresh(){
   const q=($("#search").value||"").trim().toLowerCase();
-  const rows=DATA.qbs.map(x=>{x._p=projOf(x);x._lw=lwMatch(x);return x;}).filter(x=>!q||x.name.toLowerCase().includes(q));
-  const all=DATA.qbs.slice().sort((a,b)=>b._p-a._p);
-  const replPts=all.length?all[Math.min(REPL,all.length-1)]._p:0;
+  /* _p is the RATE (what he scores in a game he plays) and _v is the SEASON
+     VALUE (that rate, times the share of the year we expect to get out of him).
+     The board ranks on _v, because a draft pick buys a season, not a rate. The
+     Proj column and the bar still print _p -- a back who misses a month is the
+     same player in the games he does play, and hiding that would make his row
+     lie about him. His row says how many games instead. */
+  const rows=DATA.qbs.map(x=>{x._p=projOf(x);x._v=valOf(x);x._lw=lwMatch(x);return x;}).filter(x=>!q||x.name.toLowerCase().includes(q));
+  const all=DATA.qbs.slice().sort((a,b)=>b._v-a._v);
+  const replPts=all.length?all[Math.min(REPL,all.length-1)]._v:0;
   rows.sort(sortCmp(sortMode));
   // Matches float to the top. Array.sort is stable, so whichever sort you picked above
   // still holds inside each group: the filter reorders the board without overruling it.
@@ -1601,10 +1692,10 @@ function refresh(){
     .filter(d=>d.style.display!=="none").map(d=>d.dataset.for));
   let dimSeen=false;   // the first non-match gets the labelled divider above it
   $("#tbody").innerHTML=rows.map((x)=>{
-    const rank=all.indexOf(x)+1, vor=x._p-replPts, w=Math.max(2,Math.round(90*x._p/maxP));
+    const rank=all.indexOf(x)+1, vor=x._v-replPts, w=Math.max(2,Math.round(90*x._p/maxP));
     const isOpen=wasOpen.has(String(x.rank));
     const dim=lwMode!=="all"&&!x._lw, edge=dim&&!dimSeen; if(dim)dimSeen=true;
-    x._vor=vor;
+    x._vor=vor; x._rank=rank;   // the panel compares this to the outside guide's rank
     // The divider is its own row, deliberately without class "row" — that selector is
     // what binds the click-to-open handler below, so a separator can never be clicked
     // open into a panel it has no QB for.

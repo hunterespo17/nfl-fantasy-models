@@ -1180,10 +1180,18 @@ def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
             # perfectly healthy 30-year-old scores low on it, and a flag that
             # said "injury history" off that number would be inventing one.
             "durability": _r(row, "durability", 2),
+            # How long a body with his history normally lasts, and that as a
+            # 0-to-1 worry score. These do NOT cut his games -- he is projected
+            # for a full season like everybody else. They drive his RISK rating,
+            # which is where an injury history belongs. See src/availability.py.
+            "avail_games": _r(row, "avail_games", 1),
+            "avail_risk": _r(row, "avail_risk", 2),
             # How many of the 17 we expect him to play, why, and what an outside
-            # guide thinks of him. `games` is the one the page ranks on.
+            # guide thinks of him. `games` is the one the page ranks on, and it
+            # is seventeen unless somebody reported something specific.
             "games": round(float(row.get("proj_games", 17.0)), 1),
             "games_note": (str(row.get("games_note") or "") or None),
+            "injury": (str(row.get("injury") or "") or None),
             "clay_rank": (int(row["clay_rank"]) if pd.notna(row.get("clay_rank")) else None),
             "rookie": bool(str(row.get("prior_source") or "") == "clay"),
             "indices": {g: round(float(row.get(g, 50.0)), 1) for g in GROUPS},
