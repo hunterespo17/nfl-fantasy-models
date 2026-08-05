@@ -61,10 +61,15 @@ EXPECT = {
     "scripts/09_check_playcallers.py": [],
     "data/adp_history.csv": [],
     "data/playcallers.csv": [("mcshanahan", "the tree column is populated")],
-    ".gitignore": [
-        ("!data/playcallers.csv", "play-callers will be committed"),
-        ("!data/adp_history.csv", "ADP history will be committed"),
-    ],
+    # NO TEXT MARKERS HERE ON PURPOSE. This used to grep .gitignore for the exact
+    # lines "!data/playcallers.csv" and "!data/adp_history.csv", which is asking
+    # the wrong question in the wrong place. The file un-ignores the whole folder
+    # with one wildcard -- "data/*" then "!data/*.csv" -- so both files ARE
+    # committed and neither literal string appears, and preflight was printing
+    # two failures and "DO NOT PUSH YET" over a board that was fine to push.
+    # Section [4] below already answers this properly by asking git itself, which
+    # is the only thing whose opinion on what git ignores actually counts.
+    ".gitignore": [],
 }
 
 

@@ -214,6 +214,15 @@ _TEMPLATE = r"""<!DOCTYPE html>
     --grid:#e1e0d9;--baseline:#c3c2b7;--border:rgba(11,11,11,.10);
     --pos:#2a78d6;--neg:#e34948;--accent:#256abf;--accent-soft:#cde2fb;
     --t1:#184f95;--t2:#256abf;--t3:#5598e7;--t4:#9ec5f4;
+    /* The tier ramp is its own thing, eight steps of ONE hue running dark to
+       light. Tier is an ordinal -- 3 is further down the board than 2 -- so it
+       gets a sequential ramp, not a set of unrelated colours; the four --t
+       variables above are two gradients' endpoints and stop at four, which is
+       short when a board runs to eleven tiers. Past eight everybody shares the
+       last step: eleven blues nobody can tell apart is not information, and the
+       tier NUMBER is printed on the divider anyway. */
+    --tg1:#123f7a;--tg2:#184f95;--tg3:#1f5faf;--tg4:#256abf;
+    --tg5:#3d84d6;--tg6:#5598e7;--tg7:#7aaeee;--tg8:#9ec5f4;
     --arch:#4a3aa7;--good:#006300;
     --brand:#123f86;--brand-2:#3a2f8f;--on-brand:#ffffff;--radius:16px;
     --shadow:0 1px 2px rgba(11,11,11,.05),0 14px 30px -18px rgba(11,11,11,.22);
@@ -223,6 +232,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
     --grid:#2c2c2a;--baseline:#383835;--border:rgba(255,255,255,.10);
     --pos:#3987e5;--neg:#e66767;--accent:#3987e5;--accent-soft:#12233b;
     --t1:#9ec5f4;--t2:#5598e7;--t3:#3987e5;--t4:#184f95;--arch:#9085e9;--good:#0ca30c;
+    /* Same ramp, run the other way. A dark page needs tier 1 to be the LIGHT
+       end -- the darkest blue is the one that disappears into #0d0d0d, and the
+       tier you most need to see is the top one. */
+    --tg1:#c3dcf8;--tg2:#9ec5f4;--tg3:#7aaeee;--tg4:#5598e7;
+    --tg5:#3d84d6;--tg6:#2f76cc;--tg7:#256abf;--tg8:#1d5aa4;
     --brand:#10336e;--brand-2:#2a2170;--on-brand:#ffffff;
     --shadow:0 1px 2px rgba(0,0,0,.5),0 16px 34px -20px rgba(0,0,0,.8);
   }
@@ -231,6 +245,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
     --grid:#2c2c2a;--baseline:#383835;--border:rgba(255,255,255,.10);
     --pos:#3987e5;--neg:#e66767;--accent:#3987e5;--accent-soft:#12233b;
     --t1:#9ec5f4;--t2:#5598e7;--t3:#3987e5;--t4:#184f95;--arch:#9085e9;--good:#0ca30c;
+    --tg1:#c3dcf8;--tg2:#9ec5f4;--tg3:#7aaeee;--tg4:#5598e7;
+    --tg5:#3d84d6;--tg6:#2f76cc;--tg7:#256abf;--tg8:#1d5aa4;
     --brand:#10336e;--brand-2:#2a2170;--on-brand:#ffffff;
     --shadow:0 1px 2px rgba(0,0,0,.5),0 16px 34px -20px rgba(0,0,0,.8);}}
   *{box-sizing:border-box}
@@ -315,6 +331,27 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .lwcount{margin:0!important;font-variant-numeric:tabular-nums}
   .lwcount b{color:var(--ink);font-weight:700}
   .rank{font-variant-numeric:tabular-nums;color:var(--accent);font-weight:800;font-size:15px;width:32px}
+  /* A rank inside a big tier is still printed -- you need to know roughly where a
+     man goes -- but it is not a verdict, and it was dressed like one. Bold accent
+     numerals down 51 rows say "the board is sure #71 beats #72", and the board
+     has been measured and is not sure: inside a tier it is a coin toss. So a rank
+     with a real claim behind it keeps the accent, and one that is mostly a
+     position on a list recedes to ordinary text. Nothing is hidden; the emphasis
+     just stops overstating. */
+  .rank.soft{color:var(--ink-2);font-weight:600}
+  /* The tier rail. Three pixels down the left edge of every rank cell, one hue,
+     stepping darker-to-lighter as you go down the board. Divider rows leave the
+     screen as soon as you scroll; this doesn't, so you can always see which
+     block you're reading and where it ends. */
+  #tbody td.rank{border-left:3px solid transparent}
+  /* Tier dividers, built like the round dividers on the Big Board below. A full
+     row rather than a heavier rule, because the label is the point: the board's
+     honest claim is "these N are one group", and a line can't say N. */
+  tr.tiersep td{background:var(--plane);color:var(--ink-2);font-size:11.5px;font-weight:700;
+    letter-spacing:.05em;text-transform:uppercase;padding:8px 12px 7px;border-top:1px solid var(--baseline)}
+  tr.tiersep .tn{color:var(--ink);font-weight:800}
+  tr.tiersep .tsw{display:inline-block;width:22px;height:8px;border-radius:3px;margin-right:10px;vertical-align:1px}
+  tr.tiersep .tnote{text-transform:none;letter-spacing:0;font-weight:500;color:var(--muted)}
   /* Wide table: on a narrow screen it scrolls sideways instead of overflowing the
      page. Names and badges never break mid-word — when the column gets tight the
      badges drop to a second line, which is tidy; "Jayden / Daniels" is not. */
@@ -1158,13 +1195,69 @@ function replIndex(pos){   // 0-based index of the first unstartable player
   const rm=(SITE.boards[pos]||{}).ratings_meta||{};
   return Math.max(0,(rm.repl_rank||12)-1);
 }
-function tiers(sorted){ // gap-based on the same value the board is ranked by
-  const v=sorted.map(q=>q._v??q._p); if(v.length<2){sorted.forEach(q=>q._tier=1);return;}
-  const d=[];for(let i=1;i<v.length;i++)d.push(v[i-1]-v[i]);
-  const mean=d.reduce((a,x)=>a+x,0)/d.length, sd=Math.sqrt(d.reduce((a,x)=>a+(x-mean)**2,0)/d.length);
-  let t=1;sorted[0]._tier=1;for(let i=1;i<v.length;i++){if(d[i-1]>mean+sd)t++;sorted[i]._tier=t;}
+/* How far apart two projections must be before the order between them means
+   anything, in points per game. Measured, not chosen: across 2022-24, every pair
+   of drafted players inside a season, sorted by how far apart the board had
+   them. Under 1.25 the higher-projected man outscores the lower one 48-61% of
+   the time with no trend -- a coin toss. From 1.25 up it climbs every step and
+   never comes back: 64%, 70%, 74%, 79%, 82%, 85%, 93%. Holds on 4,537 receiver
+   pairs and 3,079 back pairs. Must match TIER_RESOLUTION_PPG in
+   src/rankings.py -- that one tiers the printed CSV, this one tiers the page. */
+const TIER_RESOLUTION=1.25;
+/* A tier is as wide as the model can see and no wider, so it closes when a
+   player falls a full resolution below the TOP of it -- not when the gap to the
+   man directly above him is big. The old rule measured single adjacent gaps
+   against mean + 1 sd of every gap on the board, and that threshold is set by
+   the cliffs at the top, so the top eight each became their own tier while 104
+   of 128 receivers fell into one block. That shape came from the list, not the
+   data. Capping the span instead makes the promise the useful one: same tier
+   means the ranking between them is decoration, and the flat middle of the board
+   is allowed to look as flat as it actually is. */
+/* tier number -> {n, hi, lo}: how many are in it and the top and bottom of the
+   band. Rebuilt by tiers() on every slider move, because moving a weight moves
+   the boundaries -- a tier is a fact about the current board, not a label
+   stamped on a player once. */
+let TIERINFO={};
+function tiers(sorted){
+  TIERINFO={};
+  const v=sorted.map(q=>q._v??q._p);
+  if(v.length<2){sorted.forEach(q=>q._tier=1);
+    if(v.length)TIERINFO[1]={n:1,hi:v[0],lo:v[0]};return;}
+  let t=1,top=v[0];sorted[0]._tier=1;
+  for(let i=1;i<v.length;i++){
+    if(!Number.isFinite(top))top=v[i];
+    if(Number.isFinite(v[i])&&top-v[i]>TIER_RESOLUTION){t++;top=v[i];}
+    sorted[i]._tier=t;
+  }
+  sorted.forEach((q,i)=>{
+    const e=TIERINFO[q._tier]||(TIERINFO[q._tier]={n:0,hi:null,lo:null});
+    e.n++;
+    if(Number.isFinite(v[i])){if(e.hi==null)e.hi=v[i];e.lo=v[i];}
+  });
 }
-function tierColor(t){return ["var(--t1)","var(--t2)","var(--t3)","var(--t4)"][Math.min((t||1)-1,3)];}
+/* Eight steps and then everybody shares the last one. See --tg1..--tg8: the
+   ramp is one hue so the colour reads as "further down", and it stops at eight
+   because a ninth blue is not a ninth thing anybody can see. */
+function tierColor(t){return "var(--tg"+Math.min(Math.max(t||1,1),8)+")";}
+/* The label on a tier divider. It says the one thing the tier is FOR: how many
+   men the model has decided it cannot tell apart, and the band they sit in. The
+   coin-toss line only goes on the big ones -- on a two-man tier the ranking
+   between them is a coin toss too, but nobody needed telling. */
+/* "1 quarterbacks" and "1 QB" are both wrong in a sentence made of words. The
+   plural is the only long form the payload carries, so the singular comes off
+   the end of it -- quarterbacks, running backs, wide receivers and tight ends
+   all lose one letter and read right. */
+const posWord=n=>n===1?POSPL.replace(/s$/,""):POSPL;
+function tierSep(t){
+  const i=TIERINFO[t]; if(!i)return "Tier "+t;
+  const band=(i.hi==null||i.lo==null) ? ""
+    : " · "+(i.n===1||fmt(i.hi)===fmt(i.lo)
+        ? fmt(i.hi) : fmt(i.hi)+"–"+fmt(i.lo))+" a game";
+  const note=i.n>=5
+    ? ` <span class="tnote">— too close to separate; the order inside is a coin toss</span>` : "";
+  return `<span class="tsw" style="background:${tierColor(t)}"></span>`+
+    `<span class="tn">Tier ${t}</span> · ${i.n} ${posWord(i.n)}${band}${note}`;
+}
 
 // ---- draft-overlay rendering (floor / ceiling / adp / risk) ----
 const FCLS={Safe:"g",Moderate:"a",Risky:"r"};
@@ -1485,6 +1578,17 @@ function gamesLine(o){
   }
   return out.join("");
 }
+/* "Tier 9" on its own is a number with no claim attached. The panel is where
+   somebody stops to ask what it means, so it says it: how many men are in the
+   tier and how far apart the top and bottom of it are. */
+function tierLine(o){
+  const t=o._tier,i=TIERINFO[t];
+  if(!t)return "Tier –";
+  if(!i)return "Tier "+t;
+  return `<span style="display:inline-block;width:14px;height:8px;border-radius:3px;`+
+    `background:${tierColor(t)};margin-right:6px;vertical-align:1px"></span>Tier ${t} `+
+    `<span style="color:var(--muted)">(${i.n===1?"alone in it":i.n+" "+POSPL+" the model can't separate"})</span>`;
+}
 function overlays(o){
   return `<div class="ov" style="margin:2px 0 16px">
     <div class="ovh">Draft slot (ADP)</div><div>${adpTable(o)}</div>
@@ -1496,7 +1600,7 @@ function overlays(o){
     <div class="ovh">Floor</div><div>${bdg(o.floor_bucket,FCLS[o.floor_bucket])} <span style="color:var(--muted)">bad-week baseline ≈ ${fmt(o.floor_pts,1)} pts/gm</span></div>
     <div class="ovh">Ceiling</div><div>${bdg(o.ceiling_bucket,CCLS[o.ceiling_bucket])} <span style="color:var(--muted)">${o.boom25!=null?o.boom25:"–"}% of games ${BOOM[0]}+, ${o.boom30!=null?o.boom30:"–"}% ${BOOM[1]}+</span></div>
     <div class="ovh">Risk at ADP</div><div>${bdg(o.risk_bucket,RCLS[o.risk_bucket])} <span style="color:var(--muted)">${riskWhy(o)}</span></div>
-    <div class="ovh">Tier / VOR</div><div>Tier ${o._tier||"–"} <span style="color:var(--muted)">·</span> ${o._vor!=null?fmt(o._vor*17,0)+" pts over replacement (season)":"–"}</div>
+    <div class="ovh">Tier / VOR</div><div>${tierLine(o)} <span style="color:var(--muted)">·</span> ${o._vor!=null?fmt(o._vor*17,0)+" pts over replacement (season)":"–"}</div>
   </div>`;
 }
 const SORD={Safe:3,Moderate:2,Risky:1,High:3,Medium:2,Low:1};
@@ -1844,17 +1948,27 @@ function refresh(){
   const wasOpen=new Set([...document.querySelectorAll("tr.detail")]
     .filter(d=>d.style.display!=="none").map(d=>d.dataset.for));
   let dimSeen=false;   // the first non-match gets the labelled divider above it
+  /* Tier dividers only go in when the board is IN tier order. Sort by ADP or
+     float the filter matches to the top and the tiers interleave, so a divider
+     would be heading a group whose members are scattered ten rows apart -- a
+     label that isn't true of what's under it. The rail and the softened rank
+     stay on in every view, because those are facts about the player. */
+  const showTiers=sortMode==="proj"&&lwMode==="all";
+  let tSeen=null;
   $("#tbody").innerHTML=rows.map((x)=>{
     const rank=all.indexOf(x)+1, vor=x._v-replPts, w=Math.max(2,Math.round(90*x._p/maxP));
     const isOpen=wasOpen.has(String(x.rank));
     const dim=lwMode!=="all"&&!x._lw, edge=dim&&!dimSeen; if(dim)dimSeen=true;
+    const big=((TIERINFO[x._tier]||{}).n||1)>=5;
+    const tsep=(showTiers&&x._tier!==tSeen)
+      ? (tSeen=x._tier,`<tr class="tiersep"><td colspan="${NCOL}">${tierSep(x._tier)}</td></tr>`) : "";
     x._vor=vor; x._rank=rank;   // the panel compares this to the outside guide's rank
     // The divider is its own row, deliberately without class "row" — that selector is
     // what binds the click-to-open handler below, so a separator can never be clicked
     // open into a panel it has no QB for.
-    return (edge?`<tr class="lwsep"><td colspan="${NCOL}">${lwSep(lwMode)}</td></tr>`:"")+
+    return tsep+(edge?`<tr class="lwsep"><td colspan="${NCOL}">${lwSep(lwMode)}</td></tr>`:"")+
       `<tr class="row${isOpen?" open":""}${dim?" dim":""}${edge?" edge":""}" data-id="${x.rank}">
-      <td class="rank num">${rank}</td>
+      <td class="rank num${big?" soft":""}" style="border-left-color:${tierColor(x._tier)}">${rank}</td>
       <td class="qb"><b>${x.name}</b>${teamCell(x.team)}
         <span class="archtag">${styleLabel(x)}</span>${x.mover?'<span class="move">NEW</span>':''}${valueTag(x)}</td>
       <td class="num"><span class="bartrack"><span class="bar" style="width:${w}px"></span></span>${fmt(x._p)}</td>

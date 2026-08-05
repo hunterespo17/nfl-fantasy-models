@@ -268,6 +268,11 @@ DRAFT_SCORE = {1: 100.0, 2: 82.0, 3: 78.0, 4: 52.0, 5: 40.0, 6: 32.0, 7: 28.0}
 DRAFT_UNDRAFTED = 22.0
 DRAFT_FADE_SEASONS = 3.0
 
+# The most of the Talent factor draft capital is ever allowed to be. It used to
+# be all of it in year one, which meant a rookie's own projection did not touch
+# his Talent score at all.
+DRAFT_MAX_W = 0.6
+
 # How much of Volume comes from the job the depth chart implies rather than the
 # targets he actually got. A shade higher than the backs' 0.25 because receiver
 # roles carry over more cleanly than backfield splits do.
@@ -302,7 +307,16 @@ MIN_GAMES_RATIO = 0.35
 GUIDE_GAMES_FLOOR = availability.GUIDE_FLOOR
 
 # How much of a rookie's row may lean on somebody else's projection.
-ROOKIE_TRUST = 0.5
+#
+# This is the shrink weight a rookie gets in place of the career-games curve,
+# and 0.5 was too little. A veteran needs ten career games to earn 0.5, so a
+# rookie was being told his whole projected season counts for as much as ten
+# games of somebody else's snaps. It is also a second regression: the Clay row
+# is already a smoothed full-season expectation -- _clay_bundle deliberately
+# does not regress it on the way in, and then this pulled it halfway to the pool
+# floor anyway. 0.7 leaves real uncertainty on a player nobody has watched take
+# an NFL snap without flattening the eighteen of them onto one number.
+ROOKIE_TRUST = 0.7
 
 # ---------------------------------------------------------------------------
 # WHAT THE PLAYER PANEL SHOWS
@@ -997,16 +1011,46 @@ def _rookie_years(players) -> dict:
 
 
 def _draft_rounds(players) -> dict:
-    """player_id -> draft round. Missing means undrafted, which is information."""
+    """player_id -> draft round. Missing means undrafted, which is information.
+
+    UNLESS THE CLASS ITSELF IS MISSING. nflverse does not carry a draft round
+    for the incoming class until well after the draft -- every 2026 receiver in
+    the file has draft_round blank and draft_year blank while carrying
+    rookie_season 2026. Reading that blank as "round 0, undrafted" priced
+    seventeen of the eighteen rookies on this board at DRAFT_UNDRAFTED, and
+    because draft capital has not faded at all in year one, that 22.0 WAS their
+    entire Talent score: a real first-round receiver and a camp body got the
+    same number. A blank on a player whose class predates the file is genuine
+    information and still means undrafted; a blank on a player whose class the
+    file has not filled in yet means nobody has said, so it comes back None and
+    Talent falls through to what he is actually projected to do.
+    """
     out = {}
     if players is None or getattr(players, "empty", True):
         return out
     idc = next((c for c in ("gsis_id", "player_id") if c in players.columns), None)
     if not idc or "draft_round" not in players.columns:
         return out
-    for i, r in zip(players[idc], pd.to_numeric(players["draft_round"], errors="coerce")):
-        if pd.notna(i):
-            out[str(i)] = int(r) if pd.notna(r) else 0
+    rd_all = pd.to_numeric(players["draft_round"], errors="coerce")
+    # A class is "covered" once anybody who entered that year has a round on
+    # file. That keeps a genuinely undrafted 2019 receiver reading as undrafted.
+    rk_col = next((c for c in ("rookie_season", "draft_year", "entry_year")
+                   if c in players.columns), None)
+    covered = None
+    if rk_col is not None:
+        rk_all = pd.to_numeric(players[rk_col], errors="coerce")
+        covered = {int(s) for s in rk_all[rd_all.notna()].dropna().unique()}
+    for n, (i, r) in enumerate(zip(players[idc], rd_all)):
+        if pd.isna(i):
+            continue
+        if pd.notna(r):
+            out[str(i)] = int(r)
+            continue
+        if covered is not None:
+            cls = rk_all.iat[n]
+            if pd.isna(cls) or int(cls) not in covered:
+                continue                      # class not on file yet: unknown
+        out[str(i)] = 0                       # genuinely undrafted
     return out
 
 
@@ -1175,12 +1219,28 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
         wc = wc.where(ov.isna(), ov)
     p["reg_shrink"] = 1.0 - wc
 
-    tal = pd.to_numeric(p.get("talent_reg"), errors="coerce")
-    p["talent_final"] = wc * tal.fillna(0) + (1 - wc) * _shrink_target(p, "talent_reg")
+    # A MISSING MEASUREMENT IS NOT A ZERO. `wc * v.fillna(0)` reads "he ran no
+    # routes" out of "nobody has measured him yet", and then keeps the answer as
+    # a real number, which is the expensive half: Opportunity is written as
+    # wopr -> air yards -> Volume precisely so a receiver with no WOPR falls
+    # back to his target volume, and a manufactured zero stops that chain from
+    # ever firing. Twelve of the eighteen rookies came out on the same
+    # 10.6th-percentile Opportunity floor -- not a low score, the same score,
+    # which is what a floor looks like. Where the raw column is blank the answer
+    # is the job prior alone, and where the column is blank AND the prior cannot
+    # be fitted the answer stays blank so the fallback chain does its work.
+    def _final(col: str) -> pd.Series:
+        v = pd.to_numeric(p[col], errors="coerce")
+        blended = wc * v + (1 - wc) * _shrink_target(p, col)
+        return blended.where(v.notna(), np.nan)
+
+    if "talent_reg" in p.columns:
+        p["talent_final"] = _final("talent_reg")
+    else:
+        p["talent_final"] = np.nan
     for col in ("targets_pg", "target_share", "wopr", "rec_val"):
         if col in p.columns:
-            v = pd.to_numeric(p[col], errors="coerce")
-            p[col + "_final"] = wc * v.fillna(0) + (1 - wc) * _shrink_target(p, col)
+            p[col + "_final"] = _final(col)
 
     # ---- which rows are the season nobody has played yet ------------------
     # Ranking those against each other is the denominator trap REF_SEASONS
@@ -1263,11 +1323,20 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     # ---- TALENT. His own rate, shrunk toward his job -- plus draft capital
     # while it still means something. Capital fades linearly over three seasons
     # because after three years of snaps the snaps are the better evidence.
+    #
+    # CAPITAL NEVER OWNS THE WHOLE FACTOR. The fade ran to a full 1.0 in year
+    # one, so a rookie's Talent was his draft slot and nothing else -- the
+    # projection sitting right there in the same row was not consulted. Where he
+    # was picked is the better evidence early, not the only evidence, so the
+    # capital share is capped and the rest is always what he is projected to do.
     tal_pct = pct("talent_final")
     yr = pd.to_numeric(p.get("yr_in_league"), errors="coerce")
     fade = ((DRAFT_FADE_SEASONS - (yr - 1)) / DRAFT_FADE_SEASONS).clip(0.0, 1.0).fillna(0.0)
+    fade = fade.clip(upper=DRAFT_MAX_W)
     cap = pd.to_numeric(p.get("draft_score"), errors="coerce")
-    p["Talent"] = np.where(cap.notna(), (1 - fade) * tal_pct + fade * cap, tal_pct)
+    p["Talent"] = np.where(cap.notna() & tal_pct.notna(),
+                           (1 - fade) * tal_pct + fade * cap,
+                           np.where(cap.notna(), cap, tal_pct))
 
     # ---- WINDOW. A ramp, not a cliff.
     win = yr.map(WINDOW_SCORES)
