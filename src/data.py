@@ -263,6 +263,155 @@ def get_depth_charts(seasons=None, refresh: bool = False) -> pd.DataFrame | None
         return None
 
 
+# Entering-season depth-chart history, kept under its OWN cache name.
+#
+# get_depth_charts() above stores whatever seasons it last pulled under the
+# single name "depth_charts". The RB pipeline asks it for the upcoming season
+# first, so anything that later asked it for history would just get 2026 back.
+# This function has a separate cache file and a separate shape, which keeps the
+# two from stepping on each other.
+_DEPTH_HIST_NAME = "rb_depth_by_season"
+# Running backs only. Fullbacks were in here and it was quietly wrong: the depth
+# file numbers each position group on its own, so every team's FB1 arrived
+# looking like a starting running back. 96 of 458 "starters" in the history were
+# fullbacks -- backs like Patrick Ricard, who scores about 2 points a game.
+_BACKFIELD_POS = {"RB", "HB"}
+
+
+def _coalesce(df: pd.DataFrame, *names) -> pd.Series | None:
+    """First non-null value across whichever of these columns exist."""
+    out = None
+    for name in names:
+        if name not in df.columns:
+            continue
+        col = df[name]
+        out = col if out is None else out.where(out.notna(), col)
+    return out
+
+
+def _normalize_depth(dc: pd.DataFrame) -> pd.DataFrame | None:
+    """
+    Fold both depth-chart layouts into one table and keep only the snapshot
+    taken BEFORE the season started.
+
+    nflverse changed the file in 2025. Through 2024 a row is a week
+    (`club_code`, `week`, `depth_team`); from 2025 it is a dated snapshot
+    (`team`, `dt`, `pos_rank`). Mixing the two in one frame leaves both sets of
+    columns present with holes, so every field here is coalesced rather than
+    picked.
+
+    Returns: season, team, gsis_id, position, depth.
+    """
+    if dc is None or dc.empty:
+        return None
+    d = dc.copy()
+
+    team = _coalesce(d, "team", "club_code")
+    pos = _coalesce(d, "position", "pos_abb")
+    depth = _coalesce(d, "depth", "depth_team", "pos_rank")
+    pid = _coalesce(d, "gsis_id", "player_id")
+    if team is None or pos is None or depth is None or pid is None:
+        return None
+
+    stamp = pd.to_datetime(d["dt"], errors="coerce") if "dt" in d.columns else None
+    season = _coalesce(d, "season")
+    if season is not None:
+        season = pd.to_numeric(season, errors="coerce")
+    if stamp is not None:
+        # A depth chart dated January belongs to the season that started the
+        # previous August, so the season only rolls over in the spring.
+        from_stamp = stamp.dt.year - (stamp.dt.month < 3).astype("Int64")
+        season = from_stamp if season is None else season.where(season.notna(), from_stamp)
+    if season is None:
+        return None
+
+    # "How early in the season is this row?" -- the week number on the old
+    # layout, the timestamp on the new one, made comparable as one number. We
+    # only ever compare within a season, and a season is entirely one layout.
+    when = pd.Series([float("nan")] * len(d), index=d.index, dtype=float)
+    if "week" in d.columns:
+        when = pd.to_numeric(d["week"], errors="coerce").astype(float)
+    if stamp is not None:
+        secs = (stamp - pd.Timestamp("1970-01-01")).dt.total_seconds()
+        when = when.where(when.notna(), secs)
+
+    out = pd.DataFrame({
+        "season": season,
+        "team": team.astype(str).str.upper(),
+        "gsis_id": pid.astype(str),
+        "position": pos.astype(str).str.upper(),
+        "depth": pd.to_numeric(depth, errors="coerce"),
+        "_when": when.fillna(0.0),
+    })
+    out = out[out["position"].isin(_BACKFIELD_POS)]
+    out = out.dropna(subset=["season", "depth"])
+    out = out[out["gsis_id"].str.len() > 3]
+    if out.empty:
+        return None
+    out["season"] = out["season"].astype(int)
+    earliest = out.groupby("season")["_when"].transform("min")
+    out = out[out["_when"] == earliest].drop(columns="_when")
+    out["depth"] = out["depth"].astype(int)
+    out = (out.sort_values(["season", "team", "depth"])
+              .drop_duplicates(["season", "team", "gsis_id"])
+              .reset_index(drop=True))
+
+    # Renumber 1..N inside each backfield now that the fullbacks are gone --
+    # otherwise dropping an FB1 leaves the real starter sitting at 2. Dense
+    # ranking on purpose: through 2024 the file lists package-specific spots, so
+    # 25-28 teams a year show two backs tied at 1. Two men listed as the starter
+    # stay tied at 1 and the next back is 2, which is what the chart says.
+    out["depth"] = (out.groupby(["season", "team"])["depth"]
+                       .rank(method="dense").astype(int))
+    return out.sort_values(["season", "team", "depth"]).reset_index(drop=True)
+
+
+def get_depth_history(seasons=None, refresh: bool = False) -> pd.DataFrame | None:
+    """
+    Where every back sat on the depth chart ENTERING each season we model.
+
+    Entering, not mid-season, on purpose: a Week 12 depth chart already knows
+    who got hurt and who won the job, which is exactly the thing we are trying
+    to predict. Taking the first chart of the year keeps the factor honest.
+
+    Columns: season, team, gsis_id, position, depth. Returns None if the pull
+    fails, and the model treats that as "no depth information" rather than
+    falling over.
+    """
+    seasons = list(seasons or config.SEASONS)
+    if not refresh:
+        cached = load_df(_DEPTH_HIST_NAME)
+        if cached is not None:
+            return _normalize_depth(cached)
+    try:
+        nfl = _lazy_nflreadpy()
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [warn] Could not load depth-chart history ({exc}).")
+        return None
+
+    frames = []
+    for season in seasons:
+        # One season at a time so we can stamp the season ourselves -- the
+        # 2025+ files don't carry a season column at all.
+        try:
+            raw = _to_pandas(_call_loader(nfl.load_depth_charts, [season]))
+        except Exception as exc:  # noqa: BLE001
+            print(f"  [warn] depth charts {season} unavailable ({exc}).")
+            continue
+        if raw is None or raw.empty:
+            continue
+        raw = raw.copy()
+        if "season" not in raw.columns:
+            raw["season"] = season
+        frames.append(raw)
+    if not frames:
+        return None
+    out = _normalize_depth(pd.concat(frames, ignore_index=True, sort=False))
+    if out is not None and not out.empty:
+        save_df(out, _DEPTH_HIST_NAME)
+    return out
+
+
 def get_rosters(seasons=None, refresh: bool = False) -> pd.DataFrame | None:
     """Seasonal rosters (current team per player). Updated daily year-round."""
     seasons = seasons or [config.UPCOMING_SEASON]

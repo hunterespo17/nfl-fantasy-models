@@ -97,6 +97,12 @@ def main() -> None:
     # scale line about a calibration it never did.
     if not hasattr(rb_blend, "MIN_CAL_ROWS"):
         stale.append("rb_blend")
+    # Added with the Role/Window re-weight. Without these two the board would
+    # still build -- it would just be the old, market-disagreeing one.
+    if "Role" not in getattr(rb_blend, "DEFAULT_WEIGHTS", {}):
+        stale.append("rb_blend")
+    if not hasattr(data, "get_depth_history"):
+        stale.append("data")
     if not hasattr(ratings, "_flags"):
         stale.append("ratings")
     if "pos" not in inspect.signature(adp_mod.raw_picks).parameters:

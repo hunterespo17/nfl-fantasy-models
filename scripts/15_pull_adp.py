@@ -8,7 +8,9 @@ WHAT IT DOES
 It refreshes three of the four price columns for you:
 
     ESPN      straight from ESPN's own public feed
-    Sleeper   read off beatadp.com, which prints Sleeper's numbers in a table
+    Sleeper   read off beatadp.com, which prints Sleeper's numbers in a table,
+              with fantasysixpack.net read afterwards to fill anyone beatadp
+              happened to leave blank
     Underdog  read off bestballteambuilder.com, same idea
 
 Everything lands in the shape data/adp.csv already uses -- one row per player,
@@ -203,6 +205,20 @@ SLEEPER_URL = "https://www.beatadp.com/platform-adp/sleeper/redraft/half_ppr"
 # no Sleeper numbers at all.
 SLEEPER_COLS = ("sleeper",)
 
+# beatadp prints a shortish board and leaves later players blank -- that is how
+# Bhayshul Tuten ended up with no Sleeper price while going inside the top 60.
+# This second page carries the same Sleeper feed but many more rows, so it is
+# read afterwards and only fills the blanks. Checked before trusting it: its
+# Sleeper column matches beatadp's to the decimal on the players both list
+# (Gibbs 1.6, Jeanty 15.4), so the two are quotable side by side.
+#
+# Read the Sleeper column and NOTHING else off this page. Its ESPN column is a
+# different feed from the one ESPN itself hands us -- it had Josh Allen at 22.6
+# where ESPN's own numbers say 36 -- so mixing them would quietly corrupt a
+# column that is currently right.
+SLEEPER_FALLBACK_URL = "https://fantasysixpack.net/fantasy-football-adp/"
+SLEEPER_FALLBACK_COLS = ("sleeper",)
+
 UNDERDOG_URL = ("https://www.bestballteambuilder.com/"
                 "underdog-best-ball-average-draft-position")
 # That whole page is Underdog, so a plain "ADP" heading is safe there.
@@ -378,6 +394,12 @@ def pull_sleeper() -> dict:
     return pull_html_adp(SLEEPER_URL, "Sleeper", SLEEPER_COLS)
 
 
+def pull_sleeper_backup() -> dict:
+    """Second Sleeper page. Only ever used to fill in what the first one missed."""
+    return pull_html_adp(SLEEPER_FALLBACK_URL, "Sleeper (backup)",
+                         SLEEPER_FALLBACK_COLS)
+
+
 def pull_underdog() -> dict:
     return pull_html_adp(UNDERDOG_URL, "Underdog", UNDERDOG_COLS)
 
@@ -549,9 +571,13 @@ def main() -> int:
 
     # Live first. A paste file, if you ever make one, wins over the live pull
     # for the players it names -- you only make one deliberately.
+    # Order inside each set matters: later entries overwrite earlier ones, so the
+    # backup Sleeper page is listed FIRST. Everything the main page knows wins;
+    # the backup only survives for players the main page left blank.
     pulls = {
         "espn": pull_espn(),
-        "sleeper": {**pull_sleeper(),
+        "sleeper": {**pull_sleeper_backup(),
+                    **pull_sleeper(),
                     **parse_paste(config.DATA_DIR / "paste_sleeper.txt", "Sleeper")},
         "underdog": {**pull_underdog(),
                      **parse_paste(config.DATA_DIR / "paste_underdog.txt", "Underdog")},
