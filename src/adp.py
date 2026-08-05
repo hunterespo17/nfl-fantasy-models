@@ -47,6 +47,14 @@ _ALIAS = {
     "kenneth pickett": "kenny pickett",
     "cameron ward": "cam ward",
     "gardner minshew ii": "gardner minshew",
+    # Draft boards use the nickname; nflverse uses the birth name. Left alone,
+    # five straight seasons of a first-round receiver never join the ADP curve
+    # and he shows up in the "drafted but never played" list every year.
+    # Draft boards use the nickname or the long form; nflverse picks one spelling
+    # and both sides get normalised toward IT, never toward each other. Mapping
+    # each name to the other would just swap them and they would still miss.
+    "hollywood brown": "marquise brown",
+    "joshua palmer": "josh palmer",
 }
 
 

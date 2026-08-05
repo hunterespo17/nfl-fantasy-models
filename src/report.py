@@ -574,6 +574,14 @@ _TEMPLATE = r"""<!DOCTYPE html>
       0–100 (his percentile among the backs on this board), then combined with the weights below. Nothing is a black
       box: you can see exactly how much each factor counts, and change it on the <strong>RB Rankings</strong> tab.
       The scoring setting it's using is printed under the title at the top of the page.</p>
+      <p data-pos="WR">It projects each receiver's <strong>fantasy points per game</strong> as a transparent blend of
+      factors — <strong>who the player is</strong> and, far more than at any other position, <strong>how much of his
+      offence runs through him</strong>. Every factor is scored 0–100 and combined with the weights below, and you can
+      change any of them on the <strong>WR Rankings</strong> tab. One thing works differently here and it's worth
+      knowing: the upcoming season isn't ranked against itself. A season nobody has played is a shorter list than a
+      finished one — about 130 receivers off a depth chart against 180 to 200 who actually played — and a shorter list
+      can't reach as high a percentile, so every receiver would quietly score low. Each of this year's numbers is
+      placed into the last three finished seasons instead, and the three placements averaged.</p>
       <div id="btstat"></div>
     </div>
     <div class="card">
@@ -591,6 +599,16 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <p data-pos="RB"><strong>Receiving is weighted heavily on purpose.</strong> A target is worth far more than a carry
       in any points-per-catch format, so backs who stay on the field for third down have a weekly floor the pure runners
       never get. That, plus <strong>backfield share</strong>, is most of what separates a useful back from a handcuff.</p>
+      <p data-pos="WR">What share of the projection each factor drives, out of 100%. <strong>The job is most of the
+      answer here.</strong> Volume, Opportunity and Role are 44 of the 100 weights between them, because a receiver
+      cannot score points he never gets thrown. Volume is his share of the targets; Opportunity adds how far downfield
+      those targets go, so a receiver running deep routes gets credit a raw count misses; Role is how often he's on the
+      field at all.</p>
+      <p data-pos="WR"><strong>Efficiency is deliberately held to 11.</strong> Yards and first downs per route separate
+      two receivers who have the same job — they don't invent a job for someone who doesn't have one, and a great
+      per-route number on forty routes is mostly noise. <strong>Vegas is 14</strong>, higher than the backs' board at 10,
+      because a team's implied point total tracks its receivers' scoring nearly twice as closely as its backs'. Touchdowns
+      are regressed to what the volume predicts before they count at all.</p>
       <div id="weightBars"></div>
     </div>
     <div class="card" data-pos="QB">
@@ -614,6 +632,32 @@ _TEMPLATE = r"""<!DOCTYPE html>
       they sit on top of it to help you draft:</p>
       <p data-pos="RB">Beyond the projection, each back gets a few quick read-outs. These <strong>don't change the projection</strong> —
       they sit on top of it to help you draft:</p>
+      <p data-pos="WR">Beyond the projection, each receiver gets a few quick read-outs. These <strong>don't change the projection</strong> —
+      they sit on top of it to help you draft:</p>
+      <div class="ov" data-pos="WR">
+        <div class="ovh">Floor</div><div>His bad-week baseline — the recency-weighted 25th-percentile game he turns in.
+          Graded <b style="color:var(--good)">Safe</b> / <b style="color:#9a6600">Moderate</b> / <b style="color:var(--neg)">Risky</b> vs the field.
+          Receiver is the position where floor and ceiling come apart hardest: a deep threat and a slot receiver can average
+          the same points and give you completely different weeks.</div>
+        <div class="ovh">Ceiling</div><div>How often he pops: share of games over <b>20</b> and <b>25</b> points
+          (recent games count more; thin samples pulled toward the field). <b>High</b> / <b>Medium</b> / <b>Low</b>.</div>
+        <div class="ovh">ADP</div><div>Where he's drafted on each platform, as a <b>WR rank</b> — <b>Sleeper</b>, <b>ESPN</b> &amp; <b>FFC</b> (redraft) and
+          <b>Underdog</b> (best-ball). A site only gets a column if it actually prices receivers in your file. The <b>Market</b> column
+          is a neutral reference: the sites blended and re-ranked, preferring <b>Underdog</b> and <b>FFC</b>, the two you don't draft on.
+          When the platform you're drafting on is part of that blend it's taken back out before he's graded, so no site is measured
+          against a market containing itself. Set <b>&ldquo;Drafting on&rdquo;</b> to your platform and the
+          <b style="color:var(--good)">▲Value</b> / <b style="color:var(--neg)">▼Reach</b> tag flags who your platform drafts
+          <b>earlier or later than that Market</b>.</div>
+        <div class="ovh">Risk at ADP</div><div>Whether his price is worth it: paying an early pick for a shaky floor or thin
+          ceiling — or reaching past where the model ranks him — is risky. A late receiver is low-risk by definition.</div>
+        <div class="ovh">Worth the pick?</div><div>The same value question answered in <b>points</b> instead of draft slots. Five years
+          of receiver draft prices were joined to what receivers at those prices really averaged — <b>288 seasons, 2020–2024</b> — giving
+          a curve of <em>what a pick is worth</em>; this is his projection minus that. It moves live with the weight sliders.</div>
+        <div class="ovh">A ceiling on the projection</div><div>No receiver is projected above roughly <b>1.9 points per expected
+          target</b>, plus a point. That bar binds on two very different groups and is meant to: a handful of genuinely elite
+          receivers whose per-target rate the model would otherwise run away with, and the bottom of the board, where a receiver
+          on two expected targets a game cannot be projected into a startable week no matter how good his rate stats look.</div>
+      </div>
       <div class="ov" data-pos="RB">
         <div class="ovh">Floor</div><div>His bad-week baseline — the recency-weighted 25th-percentile game he turns in.
           Graded <b style="color:var(--good)">Safe</b> / <b style="color:#9a6600">Moderate</b> / <b style="color:var(--neg)">Risky</b> vs the field.
@@ -680,6 +724,41 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <p data-pos="RB">The same rule holds here as on the quarterback board: <strong>the market is smart</strong>. It prices in
       everything the model sees plus training-camp news, so don't draft <em>against</em> consensus on the model's say-so alone.
       Use the board like this instead:</p>
+      <p data-pos="WR">Same rule here as on the other two boards: <strong>the market is smart</strong>. It prices in
+      everything the model sees plus camp news, so don't draft <em>against</em> consensus on the model's say-so alone.
+      Use the board like this instead:</p>
+      <div class="ov" data-pos="WR">
+        <div class="ovh">ADP is the backbone</div><div>Start from the <b>Market</b> column — that's the neutral anchor. Set
+          <b>&ldquo;Drafting on&rdquo;</b> to your platform to see who your platform prices as a value or reach <em>versus that market</em>.</div>
+        <div class="ovh">Routes before everything</div><div>The first thing to read on any receiver is <b>how often he's on the
+          field</b>. A receiver who runs a route on <b>75%+</b> of his team's dropbacks averaged <b>9.9 points a game the following
+          season</b>; everyone else averaged <b>4.8</b>. That one line separates the board better than any talent measure in it, which is
+          why <span class="fl g">Full-time routes</span> leads the chip row and <span class="fl r">Part-time role</span> is a real warning.</div>
+        <div class="ovh">Then the chains</div><div><span class="fl g">Moves the chains</span> is Heath's first-down-per-route badge.
+          He states it at <b>0.115</b> on charted routes; ours are estimated from snap share, a different-sized denominator, so on our
+          numbers 0.115 flags three receivers out of 128 — a needle, not a screen. Re-fitted on 855 historical seasons the bar lands at
+          <b>0.095</b>: roughly the top tenth of receivers, worth <b>12.2 points a game the next season against 6.3</b>, with 58% of them
+          reaching a startable 12+. It's a badge and not a factor on purpose — the edge sits almost entirely at the top of the board.</div>
+        <div class="ovh">Where he sits in the room</div><div>The depth chart is in here, but it is not the whole vote. Entering a
+          season there are two readings of a receiver's spot: <b>where the team lists him in August</b>, and <b>where he actually ranked
+          in routes last year</b>. The model averages them, and how far it leans on last year depends on how much of last year he played
+          — a full 17 games on the same team is worth <b>75%</b> of the vote, thirteen games about half, nine or fewer only <b>30%</b>,
+          and a receiver who <b>changed teams</b> just <b>15%</b>, because his ranking was in somebody else's room. Playing hurt is the
+          reason this matters: a number one who missed six weeks ranks like a number two without ever having lost the job. The blend
+          applies to the season ahead only — a finished season has no chart to argue with, so there the tape is the whole answer.</div>
+        <div class="ovh">Which way the job is moving</div><div><span class="fl g">Role growing</span> and
+          <span class="fl g">Targets trending up</span> are the model reading a two-year slope, not a single season. At this position
+          last year's target share is the single best guess at this year's, so the direction it's moving is most of what's left.</div>
+        <div class="ovh">Career window</div><div><span class="fl g">Career window</span> means years three to five, where receiver
+          production peaks. It's later than the running backs' window and much later than the market usually assumes — a receiver's
+          third year is not "already broken out," it's the year to buy.</div>
+        <div class="ovh">Crowded rooms</div><div><span class="fl r">Crowded room</span> flags the six offences with the most contested
+          target trees. <b>Nothing is deducted for it</b> — a crowded room is already priced into a receiver's target share, and
+          subtracting it twice would double-count. It's there so you know why two similar projections might draft very differently.</div>
+        <div class="ovh">What's missing</div><div><b>Route share is estimated</b>, not charted — snap share times team dropbacks. It's a
+          good proxy and it isn't the real thing. There's also <b>no 2025 draft-price data</b> on any platform, so the ADP fit skips that
+          year entirely.</div>
+      </div>
       <div class="ov" data-pos="RB">
         <div class="ovh">ADP is the backbone</div><div>Start from the <b>Market</b> column (Underdog + FFC blended) — that's the neutral
           anchor. Set <b>&ldquo;Drafting on&rdquo;</b> to your platform to see who your platform prices as a value or reach <em>versus that market</em>.</div>
@@ -728,6 +807,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <strong>Offensive-line quality is proxied</strong>, not measured, because it isn't cleanly available in free data.
       And a back who <strong>changed teams</strong> is flagged, with his team-based factors pulled toward neutral, because
       nobody knows what his new role is yet. Rookies with no NFL games aren't projected at all.</p>
+      <p data-pos="WR">Four things to keep in mind. <strong>Route share is estimated, not charted</strong> — it's snap share
+      times how often the team drops back, which is close but not the real number, and it's the reason Heath's first-down bar
+      had to be re-fitted rather than copied. <strong>Route share and snap share are treated as the same thing</strong>, which
+      is true for most receivers and wrong for the ones used as blockers. <strong>Rookies are on the board</strong> — unlike the
+      running-back model — but a rookie has no NFL games to measure, so his row leans heavily on where he was drafted and on
+      Mike Clay's projection, and is flagged as such. And a receiver who <strong>changed teams</strong> has his team-based
+      factors pulled toward neutral, because his new target share is a guess.</p>
     </div>
   </section>
 
@@ -750,18 +836,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
             <option value="ceiling">Ceiling</option>
             <option value="risk">Risk</option>
           </select></label>
-        <!-- Quarterbacks only. Every option below is Heath's two-path QB screen, and
-             on any other board `lw_gate` is null for every player, so the filter would
-             offer five settings that all return an empty result. -->
-        <label class="note" style="margin:0" data-pos="QB">League winners&nbsp;
-          <select class="sortsel" id="lwsel" title="Heath's two-path screen, applied to the board. Nothing is hidden — non-matches are dimmed and sorted below.">
-            <option value="all">All QBs</option>
-            <option value="late">Late-round winners (after Rd 10)</option>
-            <option value="any">Clears a path — any round</option>
-            <option value="rush">— via rushing (100+ att)</option>
-            <option value="pc">— via McShanahan play-caller</option>
-            <option value="miss">Misses both paths</option>
-          </select></label>
+        <!-- The board filter. Its label, its options, the rule each one applies and
+             both of its captions come from LWDEF in the script below, keyed by
+             position: Heath's two-path screen at quarterback, his route gate and
+             first-down badge at receiver. A board with no entry there hides this
+             control rather than offering settings that all return nothing. -->
+        <label class="note" style="margin:0" id="lwwrap" hidden><span id="lwlab"></span>&nbsp;
+          <select class="sortsel" id="lwsel" title="A screen applied to the board. Nothing is hidden — non-matches are dimmed and sorted below the line."></select></label>
         <input class="search" id="search" type="search" placeholder="Search…" aria-label="Search">
         <span class="note" style="margin:0">Click a row for the full breakdown.</span>
       </div>
@@ -1461,40 +1542,95 @@ function pickOf(x){
   return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;
 }
 const viaHas=(x,re)=>(x.lw_gate_via||[]).some(s=>re.test(s));
-function lwMatch(x){
-  switch(lwMode){
-    // An unpriced QB has no round, so he cannot be shown to be late. He stays on the
-    // board dimmed rather than passing on data we don't have -- same rule the gate
-    // itself uses, where unmeasured is never treated as a fail or a pass.
-    case "late":{const p=pickOf(x);return x.lw_gate===true&&p!=null&&p>RD10;}
-    case "any":  return x.lw_gate===true;
-    case "rush": return viaHas(x,/rush/i);
-    case "pc":   return viaHas(x,/play-?caller/i);
-    // Only QBs measured on BOTH paths and failing both. "Not enough data" is not a miss.
-    case "miss": return x.lw_gate===false;
-    default:     return true;
-  }
+const wrf=x=>x.wr_flags||{};
+
+/* Everything the filter needs, per position, in one table: the label on the
+   control, the options it offers, the rule each option applies, the sentence
+   that counts the matches, and the sentence written on the divider. Adding a
+   filter to a new board is one entry here and nothing else — the control, the
+   dimming, the divider and the count below are all position-blind.
+
+   The captions are FUNCTIONS, not strings. Round 10 is TEAMS×10 picks in and
+   the league size is read off the board, so a string built once at load would
+   keep quoting the first board's league size after you switched boards. */
+const LWDEF={
+  QB:{label:"League winners",
+    opts:[["all","All QBs"],
+          ["late","Late-round winners (after Rd 10)"],
+          ["any","Clears a path — any round"],
+          ["rush","— via rushing (100+ att)"],
+          ["pc","— via McShanahan play-caller"],
+          ["miss","Misses both paths"]],
+    /* An unpriced QB has no round, so he cannot be shown to be late. He stays on
+       the board dimmed rather than passing on data we don't have — the same rule
+       the gate itself uses, where unmeasured is never a pass or a fail. */
+    match:{late:x=>{const p=pickOf(x);return x.lw_gate===true&&p!=null&&p>RD10;},
+           any: x=>x.lw_gate===true,
+           rush:x=>viaHas(x,/rush/i),
+           pc:  x=>viaHas(x,/play-?caller/i),
+           // Measured on BOTH paths and failing both. "Not enough data" is not a miss.
+           miss:x=>x.lw_gate===false},
+    note:{late:()=>`clear one of the two paths and go after pick ${RD10} — Round 10 in a ${TEAMS}-team league, which is the range Heath's finding is stated for`,
+          any: ()=>"clear one of the two paths, at any draft cost",
+          rush:()=>"clear the rushing path (100+ carry pace)",
+          pc:  ()=>"play for a McShanahan-tree play-caller",
+          miss:()=>"were measured on both paths and cleared neither"},
+    sep:{late:()=>`Below the line — go inside pick ${RD10}, clear neither path, or aren't priced`,
+         any: ()=>"Below the line — clear neither path, or aren't measured on both",
+         rush:()=>"Below the line — not on a 100+ carry pace",
+         pc:  ()=>"Below the line — not a McShanahan-tree play-caller",
+         miss:()=>"Below the line — clear at least one path, or aren't measured on both"}},
+
+  /* The receiver screens. Two of Heath's, plus the two facts about a receiver
+     that the market prices and the model deliberately does not: which career
+     year he is in, and whether his room is crowded. A receiver with no measured
+     route share has neither screen decided, so he is never a match and never a
+     miss — same treatment the quarterback gate gives an unmeasured passer. */
+  WR:{label:"Screen",
+    opts:[["all","All WRs"],
+          ["gate","Runs 75%+ of the routes"],
+          ["fd","Moves the chains (1D per route)"],
+          ["both","Clears both screens"],
+          ["window","In the career window (yrs 3–5)"],
+          ["crowded","In a crowded receiver room"],
+          ["miss","Clears neither screen"]],
+    match:{gate:  x=>wrf(x).gate75===true,
+           fd:    x=>wrf(x).fd_badge===true,
+           both:  x=>wrf(x).gate75===true&&wrf(x).fd_badge===true,
+           window:x=>wrf(x).prime===true,
+           crowded:x=>wrf(x).crowded===true,
+           miss:  x=>x.route_share!=null&&wrf(x).gate75===false&&wrf(x).fd_badge===false},
+    note:{gate:  ()=>"run a route on 75%+ of their team's dropbacks, which was worth 9.9 points a game the following season against 4.8",
+          fd:    ()=>"earn a first down on 9.5%+ of their routes — Heath's badge, re-fitted to our route estimate — worth 12.2 points a game next season against 6.3",
+          both:  ()=>"clear the route gate AND the first-down badge",
+          window:()=>"are in years three to five, where receiver production peaks",
+          crowded:()=>"play in one of the six rooms the market treats as crowded (nothing is deducted for it — see How it works)",
+          miss:  ()=>"were measured on both screens and cleared neither"},
+    sep:{gate:  ()=>"Below the line — under 75% of the routes, or no measured route share",
+         fd:    ()=>"Below the line — under a 0.095 first-down rate, or too few routes to judge",
+         both:  ()=>"Below the line — clear at most one of the two screens",
+         window:()=>"Below the line — first or second year, or year six and beyond",
+         crowded:()=>"Below the line — not in one of the six rooms",
+         miss:  ()=>"Below the line — clear at least one screen, or aren't measured on both"}},
+};
+function lwDef(){return LWDEF[POS]||null;}
+function lwMatch(x){const d=lwDef(); if(!d)return true;
+  const f=d.match[lwMode]; return f?!!f(x):true;}
+function lwNote(m){const d=lwDef(),f=d&&d.note[m]; return f?f():"";}
+/* What the rows BELOW the line have in common — the negation of the mode, spelled
+   out rather than left as "the others". On a board where nothing is removed, the
+   line is the only thing telling you which half you're reading. */
+function lwSep(m){const d=lwDef(),f=d&&d.sep[m]; return f?f():"";}
+/* Built fresh on every board switch, because the options are per-position and a
+   leftover "via rushing" setting on the receiver board would match nobody. */
+function rebuildFilter(){
+  const d=lwDef(),wrap=$("#lwwrap"),sel=$("#lwsel");
+  wrap.hidden=!d;
+  if(!d){sel.innerHTML="";return;}
+  $("#lwlab").textContent=d.label;
+  sel.innerHTML=d.opts.map(([v,t])=>`<option value="${v}">${t}</option>`).join("");
+  sel.value=lwMode;
 }
-/* Functions, not constants. Round 10 is TEAMS×10 picks in, and the league size
-   is read off the board -- so a fixed string written once at load would keep
-   quoting the first board's league size after you switched boards. */
-function lwNote(m){return {
-  late:`clear one of the two paths and go after pick ${RD10} — Round 10 in a ${TEAMS}-team league, which is the range Heath's finding is stated for`,
-  any:"clear one of the two paths, at any draft cost",
-  rush:"clear the rushing path (100+ carry pace)",
-  pc:"play for a McShanahan-tree play-caller",
-  miss:"were measured on both paths and cleared neither",
-}[m]||"";}
-/* What the QBs BELOW the line have in common — the negation of the mode, spelled out
-   rather than left as "the others". On a board where nothing is removed, the line is
-   the only thing telling you which half you're reading. */
-function lwSep(m){return {
-  late:`Below the line — go inside pick ${RD10}, clear neither path, or aren't priced`,
-  any:"Below the line — clear neither path, or aren't measured on both",
-  rush:"Below the line — not on a 100+ carry pace",
-  pc:"Below the line — not a McShanahan-tree play-caller",
-  miss:"Below the line — clear at least one path, or aren't measured on both",
-}[m]||"";}
 
 /* --- images -------------------------------------------------------------
    Logos and headshots come from ESPN's image CDN. Nothing here is load-bearing:
@@ -1805,8 +1941,8 @@ function loadBoard(pos){
   computeMarket();
 
   // Controls that describe the board reset with it: "Drafting on Sleeper" is
-  // meaningless on a board Sleeper doesn't price, and Heath's screen is a claim
-  // about quarterbacks, so every other board comes back to All.
+  // meaningless on a board Sleeper doesn't price, and the screens are different
+  // questions at each position, so the filter always comes back to All.
   draftPlatform="consensus"; sortMode="proj"; lwMode="all";
   $("#search").value=""; $("#lwcount").innerHTML="";
   rebuildSelects();
@@ -1839,7 +1975,7 @@ function rebuildSelects(){
   $("#platsel").innerHTML='<option value="consensus">Consensus</option>'+
     PLATS.map(p=>`<option value="${p}">${PLABEL[p]||p}</option>`).join("");
   $("#platsel").value=draftPlatform;
-  $("#lwsel").value=lwMode;
+  rebuildFilter();
 }
 /* Blocks written for one position only -- the archetype cards, Heath's screen --
    are marked data-pos in the HTML and shown or hidden here. This is what lets a

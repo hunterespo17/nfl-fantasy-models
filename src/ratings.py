@@ -293,6 +293,115 @@ def _flags(payload: list, pos: str, S: dict) -> None:
         cg, age = q.get("career_games"), q.get("age")
         f = []
 
+        if pos == "WR":
+            # Same two-list construction as the backs below, and for the same
+            # reason: six flattering chips must never be able to crowd out the
+            # one that says he is hurt.
+            up, dn = [], []
+            wf = q.get("wr_flags") or {}
+
+            # THE JOB FIRST. At this position the job is most of the answer --
+            # Volume, Opportunity and Role are 44 of the 100 weights between
+            # them -- so the chips that describe it lead the row.
+            if wf.get("gate75"):
+                up.append(["up", "Full-time routes"])
+            else:
+                rs = q.get("route_share")
+                if rs is not None and rs <= 0.55:
+                    dn.append(["down", "Part-time role"])
+            ts = q.get("target_share")
+            if ts is not None and ts >= 0.25:
+                up.append(["up", f"{round(ts * 100)}% target share"])
+            elif ts is not None and ts <= 0.10:
+                dn.append(["down", "Little of the target pie"])
+
+            # WHERE THE JOB IS HEADING. A role is worth more climbing than
+            # falling, and both trends are already on the row as a season-over-
+            # season difference in share, so the bars are absolute, not ranks.
+            rt, tt = q.get("route_trend"), q.get("ts_trend")
+            if rt is not None and rt >= 0.06:
+                up.append(["up", "Role growing"])
+            elif rt is not None and rt <= -0.08:
+                dn.append(["down", "Role shrinking"])
+            if tt is not None and tt >= 0.04:
+                up.append(["up", "Targets trending up"])
+            elif tt is not None and tt <= -0.05:
+                dn.append(["down", "Targets trending down"])
+
+            # HEATH'S BADGE. First downs per route, re-fitted to our route
+            # estimate in wr_blend.py. It is the strongest single chip here:
+            # the receivers who earn it went for 12.2 points a game the
+            # following season against 6.3 for everyone else.
+            if wf.get("fd_badge"):
+                up.append(["up", "Moves the chains"])
+
+            # CAREER STAGE. Years three to five is the window; the first two
+            # are the cheap climb. Worded differently on purpose, same as the
+            # backs -- "Age 31" in red beside "Career window" in green should
+            # not read as two versions of the same chip.
+            if wf.get("prime"):
+                up.append(["up", "Career window"])
+            elif wf.get("ascending") and cg is not None and cg >= 8:
+                up.append(["up", "Ascending"])
+            if age is not None and age >= old_age:
+                dn.append(["down", f"Age {age}"])
+
+            # TEAM AND EFFICIENCY. Vegas carries 14 on this board against the
+            # backs' 10, so a receiver's offence earns a chip of its own.
+            veg = ix.get("Vegas", 50)
+            if veg >= 70:
+                up.append(["up", "Winning offense"])
+            elif veg <= 32:
+                dn.append(["down", "Weak team"])
+            eff = ix.get("Efficiency", 50)
+            if eff >= 75:
+                up.append(["up", "Efficient"])
+            elif eff <= 25:
+                dn.append(["down", "Inefficient"])
+
+            # TOUCHDOWN LUCK, both directions. The projection already regresses
+            # the count toward a yards expectation, so this chip is not a
+            # warning about the number on the row -- it is the reason the number
+            # on the row disagrees with last season's box score.
+            if wf.get("td_unlucky"):
+                up.append(["up", "TDs owed back"])
+            elif wf.get("td_lucky"):
+                dn.append(["down", "TD luck to give back"])
+
+            # A crowded room is a MARKET observation, not a production one --
+            # see CROWDED_TEAMS in wr_blend.py, where the teammate test found no
+            # effect at all. It is shown because the price reflects it.
+            if wf.get("crowded"):
+                dn.append(["down", "Crowded room"])
+            if q.get("mover"):
+                dn.append(["warn", "New team"])
+
+            hurt = q.get("avail_risk")
+            if hurt is not None and hurt >= 0.60:
+                dn.append(["warn", "Rarely makes it through a year"])
+            elif hurt is not None and hurt >= 0.35:
+                dn.append(["warn", "Misses games most years"])
+
+            # Reported THIS year, which is a different claim from the history
+            # above, and the only thing that moves his games count -- so it goes
+            # to the front of the bad news.
+            gm, inj = q.get("games"), q.get("injury")
+            if q.get("games_note") and gm is not None:
+                dn.insert(0, ["warn", (f"{inj}, ~{round(float(gm))} games" if inj
+                                       else f"Only {round(float(gm))} games")])
+            elif inj:
+                dn.insert(0, ["warn", f"{inj}, cleared to play"])
+            if q.get("rookie"):
+                dn.insert(0, ["warn", "Rookie -- no NFL games"])
+
+            f = up[:3] + dn[:3]
+            for extra in up[3:] + dn[3:]:
+                if len(f) >= 6:
+                    break
+                f.append(extra)
+            q["flags"] = f
+            continue
+
         if pos == "RB":
             # Built as two lists, good news and bad, so that trimming to six can't
             # starve the warnings. A back with six flattering chips and a torn ACL

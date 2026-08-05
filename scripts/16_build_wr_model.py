@@ -1,0 +1,341 @@
+"""
+Step 16 -- Build the WR projection model for the UPCOMING season.
+
+Same shape as the running-back build (scripts\\11_build_rb_model.py), with the
+differences a receiver room forces:
+
+  * It keeps the top FOUR receivers on each depth chart, not three. A backfield
+    thins out fast; a receiver room does not. Measured over 2018-2025 the WR4
+    still runs a route on 41% of dropbacks and sees 2.9 targets a game -- a real
+    if small job, and the slot every injury promotes out of. WR5 is 26% and
+    1.9 targets, which is not a fantasy player. Four is where the drop is.
+  * It passes play-by-play through to the model. Routes are not in any public
+    table, so the board estimates them as snap share times team dropbacks, and
+    the dropback count comes from the pbp file.
+  * It prints the name-match warnings the model collects. The snap table joins
+    on names, not IDs; where a name is ambiguous the model refuses to guess and
+    says so here rather than quietly handing one receiver another's route share.
+
+    py scripts\\16_build_wr_model.py
+
+First run downloads play-by-play, players, depth charts, rosters, and snap
+counts (all cached afterward).
+"""
+import os
+import pathlib
+import shutil
+import sys
+
+# --- Stale-bytecode guard (important when the project lives in OneDrive) ------
+# OneDrive syncs the __pycache__ folder to the cloud and can restore an OLD .pyc
+# whose timestamp makes Python skip recompiling your updated source -- so edits
+# silently don't take effect. We (1) refuse to write new .pyc files and (2) wipe
+# any existing caches right here, BEFORE importing project modules, so every run
+# compiles from the current source no matter what OneDrive did. We delete .pyc
+# files individually (a locked file can make a whole-dir rmtree fail silently).
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
+for _pyc in _ROOT.rglob("*.pyc"):
+    try:
+        _pyc.unlink()
+    except OSError:
+        pass
+for _pc in sorted(_ROOT.rglob("__pycache__"), key=lambda p: -len(p.parts)):
+    try:
+        _pc.rmdir()
+    except OSError:
+        shutil.rmtree(_pc, ignore_errors=True)
+
+import inspect  # noqa: E402
+
+import pandas as pd  # noqa: E402
+
+from src import (  # noqa: E402
+    adp as adp_mod, config, current_roster, data, media, ratings, report,
+    team_features, wr_blend,
+)
+
+POS = "WR"
+KEEP_DEPTH = 4          # WR1..WR4 on each depth chart
+
+
+def _refresh_site() -> None:
+    """Rebuild the one-page board, so it is never a command you can forget.
+
+    Wrapped in a catch on purpose: a problem assembling the combined page must
+    not throw away the board this script just spent two minutes building.
+    """
+    print(f"\nThis board on its own:  {config.OUTPUT_DIR / 'wr_model.html'}")
+    try:
+        out, boards = report.build_site(config.OUTPUT_DIR / "boards",
+                                        config.OUTPUT_DIR / "index.html")
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"  (couldn't refresh the combined page: {exc})")
+        print("   Run  py scripts\\12_build_site.py  to try again.")
+        return
+    if out is None:
+        return
+    tabs = " + ".join(m.get("pos", "?") for _, m in boards)
+    print(f"\n  >>> OPEN THIS ONE:  {out}")
+    print(f"      All positions on one page ({tabs}), plus the Big Board.")
+
+
+def _scoring_label() -> str:
+    r = config.SCORING.get("reception", 1.0)
+    return {1.0: "Full PPR", 0.5: "Half PPR", 0.0: "Standard"}.get(r, f"{r}/rec")
+
+
+def main() -> None:
+    # Loud check: if a stale .pyc still shadowed the new source, say so plainly
+    # instead of silently producing an old-looking board.
+    stale = []
+    if "Opportunity" not in getattr(wr_blend, "DEFAULT_WEIGHTS", {}):
+        stale.append("wr_blend")
+    # The ceiling shipped on day one for receivers. A copy without it would still
+    # build a board -- just one that lets a three-target receiver project twelve.
+    if not hasattr(wr_blend, "CEIL_SLOPE"):
+        stale.append("wr_blend")
+    # The two-tier name matcher. Without it the board silently swaps route shares
+    # between players who share a first initial and surname.
+    if not hasattr(wr_blend, "_short_key"):
+        stale.append("wr_blend")
+    if not hasattr(data, "get_depth_history"):
+        stale.append("data")
+    if not hasattr(ratings, "_flags"):
+        stale.append("ratings")
+    if "pos" not in inspect.signature(adp_mod.raw_picks).parameters:
+        stale.append("adp")
+    if stale:
+        print("\n" + "=" * 68)
+        print("[!] STALE CODE LOADED for: " + ", ".join(dict.fromkeys(stale)))
+        print("    An old cached copy is overriding the new files. Fix it with:")
+        print("      1. Close this terminal window completely.")
+        print("      2. Delete every '__pycache__' folder inside the project.")
+        print("      3. Open a fresh terminal and run this script again.")
+        print("    (If it keeps happening, the project is inside OneDrive — moving")
+        print("     it to a non-synced folder like C:\\Dev\\ ends this for good.)")
+        print("=" * 68 + "\n")
+        return
+
+    weekly = data.load_df("player_weekly_stats")
+    if weekly is None:
+        print("No cached data. Run scripts/01_pull_data.py first.")
+        return
+    schedules = data.load_df("schedules")
+
+    print("Loading games, players, and CURRENT depth charts + rosters...")
+    pbp = data.get_pbp(config.SEASONS)
+    players = data.get_players()
+    depth = data.get_depth_charts([config.UPCOMING_SEASON])
+    rosters = data.get_rosters([config.UPCOMING_SEASON])
+
+    # Snap share. Not optional here the way it is for backs: routes ARE snap
+    # share on this board, so without it Volume and every per-route rate fall
+    # back to targets alone. Still wrapped -- a degraded board beats no board --
+    # but it says so loudly, because a receiver board without routes is a
+    # different, worse model than the one this script claims to build.
+    snaps = None
+    try:
+        snaps = data.get_snap_counts(config.SEASONS)
+        print(f"  snap counts: {len(snaps):,} rows")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [!] Snap counts unavailable ({type(exc).__name__}: {exc}).")
+        print("      Route share, yards per route and 1D/RR all go missing — "
+              "the board falls back to targets alone.")
+
+    team_season = team_features.build_team_season_features(pbp, schedules, weekly)
+
+    # ---- current team + depth-chart mapping (with a debug dump we can verify) ----
+    cmap, dbg = current_roster.build_current_map(depth, rosters, pos=POS)
+    debug_path = config.OUTPUT_DIR / "current_map_debug_wr.txt"
+    lines = [f"UPCOMING_SEASON = {config.UPCOMING_SEASON}", f"POSITION = {POS}",
+             f"KEEP_DEPTH = {KEEP_DEPTH}", ""] + dbg + ["", f"MAPPED {POS}s:"]
+    if not cmap.empty:
+        show = cmap.sort_values(["team", "depth_rank"], ascending=[True, True])
+        lines += show.to_string(index=False).splitlines()
+    debug_path.write_text("\n".join(str(x) for x in lines), encoding="utf-8")
+    print(f"  wrote mapping debug -> {debug_path}")
+
+    if cmap.empty:
+        print("\n  [!] No current depth-chart/roster data available. Falling back to LAST "
+              "season's teams (these may be stale). Re-run once nflverse has current data.")
+        result = wr_blend.run(weekly, team_season, players, config.SCORING,
+                              config.CURRENT_SEASON, snaps=snaps, pbp=pbp)
+        season_label = f"{config.CURRENT_SEASON} (stale teams — current roster data unavailable)"
+    else:
+        keep = current_roster.starters(cmap, keep_depth=KEEP_DEPTH)
+        n_norank = int(pd.to_numeric(keep["depth_rank"], errors="coerce").isna().sum())
+        print(f"  depth charts: {len(cmap)} {POS}s found, keeping {len(keep)} at rank "
+              f"1-{KEEP_DEPTH}"
+              + (f" (plus {n_norank} with no depth-chart rank — kept rather than cut, "
+                 "since a missing row is a data gap, not a bad player)" if n_norank else ""))
+        result = wr_blend.run_upcoming(
+            weekly, team_season, players, keep, config.SCORING, config.UPCOMING_SEASON,
+            snaps=snaps, pbp=pbp,
+        )
+        season_label = f"{config.UPCOMING_SEASON} outlook"
+
+    if not result["payload"]:
+        print(f"No {POS}s with enough history to project.")
+        return
+
+    cov = result.get("snap_coverage")
+    if cov is not None:
+        note = "" if cov >= 0.9 else "  <- low; check the name-match warnings below"
+        print(f"  snap share matched on {cov:.1%} of {POS} seasons{note}")
+
+    # The snap table has no player IDs, so it joins on names. Where a name is
+    # ambiguous the model refuses to guess -- but a refusal that nobody sees is
+    # the same as a wrong answer, so print it. WR_MODEL_PLAN.md, bite 4.
+    warn = result.get("warnings") or []
+    if warn:
+        print(f"\n  Name-match notes ({len(warn)}):")
+        for w in warn[:10]:
+            print(f"     {w}")
+        if len(warn) > 10:
+            print(f"     ...and {len(warn) - 10} more")
+
+    # ---- descriptive draft overlays (floor / ceiling / ADP / risk) ----------
+    # These do NOT change the projection or ranking; they are added on top.
+    adp_df = adp_mod.load_adp()
+    n_wr_adp = len(adp_mod.for_pos(adp_df, POS)) if not adp_df.empty else 0
+    if n_wr_adp == 0:
+        print(f"  [note] No {POS} rows in data/adp.csv — floor/ceiling shown, "
+              "ADP, value and risk skipped. Add rows with pos=WR to turn those on.")
+    result = ratings.attach(result, weekly, config.SCORING, adp_df, config, pos=POS)
+
+    # ---- headshots (cosmetic only) -----------------------------------------
+    try:
+        n_shots = media.attach_headshots(result["payload"], players, rosters)
+        if n_shots:
+            print(f"  headshots matched for {n_shots}/{len(result['payload'])} {POS}s")
+        else:
+            print("  [note] No headshot URLs found in the nflverse tables — "
+                  "the board will show initials instead.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [note] Headshots skipped ({type(exc).__name__}: {exc}).")
+
+    cv = (result.get("ratings_meta") or {}).get("curve")
+    if not cv:
+        print("  [note] No ADP expectation curve — 'worth the pick?' in points is skipped. "
+              "Needs WR rows in data/adp_history.csv whose names match.")
+    elif cv.get("source") == "board":
+        print("  [note] ADP curve fell back to THIS year's prices (no WR history in "
+              "data/adp_history.csv, or the names wouldn't join). It can only say "
+              "'cheap for this year's market', not 'cheap versus history'.")
+    else:
+        print(f"  ADP expectation curve: {cv['n']} {POS} seasons over "
+              f"{'-'.join(str(s) for s in (cv['seasons'][:1] + cv['seasons'][-1:]))}, "
+              f"R²={cv['r2']} ({cv['missed']} drafted {POS}s never played enough to score)")
+
+    _cal = result.get("calibration") or {}
+    if _cal.get("anchor") == "drafted players":
+        print(f"  Points scale: fit on {_cal['n_used']} drafted {POS} seasons "
+              f"(of {_cal['n_all']} with scoring), the same crowd as the curve above.")
+        if _cal.get("shape") == "curve":
+            print(f"     Bent to the curve's shape at {len(_cal['knots'])} points, so the "
+                  f"top of the board can pull away: best {POS} projects "
+                  f"{_cal.get('top')}, deepest {_cal.get('floor')} per game.")
+        else:
+            print("     [note] One straight line — not enough drafted seasons to bend it. "
+                  "The top of the board will read a couple of points light.")
+        if _cal.get("hedge_gap") is not None:
+            _hg = _cal["hedge_gap"]
+            print(f"     Factors explain {_cal.get('r_composite')} vs draft slot's "
+                  f"{_cal.get('r_pick')} (gap {_hg:+.3f})"
+                  + ("." if abs(_hg) < 0.10 else
+                     " — over 0.10 apart, so read the value column with that in mind."))
+        _floor = [q["name"] for q in (result.get("payload") or [])
+                  if (q.get("proj_ppg") or 0) <= 0]
+        if _floor:
+            print(f"     {len(_floor)} at the 0.0 floor (deep receivers the scale bottoms "
+                  "out on): " + ", ".join(_floor[:8]) + (" ..." if len(_floor) > 8 else ""))
+    elif _cal:
+        print(f"  [note] Points scale fell back to ALL {_cal.get('n_all')} {POS}s, "
+              f"including undrafted ones — only {_cal.get('n_drafted')} drafted seasons "
+              f"joined by name and it needs {wr_blend.MIN_CAL_ROWS}. Early-round receivers "
+              "will read too cheap and late-round ones too rich.")
+
+    _missed = result.get("curve_missed") or []
+    if _missed:
+        print(f"  Not in the fit ({len(_missed)}) — drafted but under "
+              f"{adp_mod.MIN_GAMES_HIST} games, OR the name didn't match:")
+        for i in range(0, min(len(_missed), 24), 4):
+            print("     " + "  |  ".join(_missed[i:i + 4]))
+        if len(_missed) > 24:
+            print(f"     ...and {len(_missed) - 24} more")
+        print("     If someone there played a full season, it's a spelling "
+              "mismatch — send me the name.")
+
+    # How often the workload ceiling actually bit. Zero would mean it is
+    # decoration; a lot would mean the scale is running away from the volume.
+    n_cap = sum(1 for q in result["payload"]
+                if q.get("ceil") is not None and q.get("proj_ppg") is not None
+                and abs(q["proj_ppg"] - q["ceil"]) < 0.051)
+    print(f"  Workload ceiling ({wr_blend.CEIL_BASE} + {wr_blend.CEIL_SLOPE} x expected "
+          f"targets) binds on {n_cap} of {len(result['payload'])} receivers.")
+
+    bt = result.get("backtest", {})
+    if bt:
+        print(f"\n  Backtest ({' & '.join(str(s) for s in bt['seasons'])}): "
+              f"model MAE {bt['model_mae']} vs baseline {bt['baseline_mae']}")
+        print("  (MAE is an average. It rewards being right about the middle of the board "
+              "and says nothing about whether the league-winners got flagged.)")
+    skipped = result.get("skipped_rookies", [])
+    if skipped:
+        print(f"  Not projected (no NFL history yet — rookies/first-timers): "
+              f"{', '.join(skipped[:12])}" + (" ..." if len(skipped) > 12 else ""))
+
+    meta = {
+        "pos": POS,
+        "season": config.UPCOMING_SEASON, "season_label": season_label,
+        "subline": f"WR index-blend · top {KEEP_DEPTH} on each depth chart · "
+                   f"{_scoring_label()}",
+        "note": f"{len(result['payload'])} receivers. Teams and depth from current depth "
+                f"charts; production from games through {config.CURRENT_SEASON}. Routes are "
+                "estimated as snap share x team dropbacks — no public table carries them.",
+    }
+    (config.OUTPUT_DIR / "wr_model.html").write_text(report.render(result, meta), encoding="utf-8")
+    report.save_board(result, meta, config.OUTPUT_DIR / "boards" / "wr.json")
+    rows = [{k: q.get(k) for k in ("rank", "name", "team", "mover", "starter", "depth_rank",
+                                   "proj_ppg", "ceil", "proj_total", "tier", "vor",
+                                   "adp_label", "value_gap", "value_tag",
+                                   "exp_fpg", "value_fpg", "value_fpg_tag",
+                                   "targets_pg", "targets_pace", "exp_targets",
+                                   "target_share", "air_yards_share", "wopr",
+                                   "route_share", "est_routes", "snap_pct",
+                                   "yprr", "fd_rr", "ypc", "yac_pc", "adot",
+                                   "rec_pg", "rec_yds_pg", "rec_fpg", "rush_fpg",
+                                   "td", "exp_td", "td_gap", "ts_trend", "route_trend",
+                                   "yr_in_league", "age", "career_games", "durability",
+                                   "games", "floor_pts", "floor_bucket", "boom25", "boom30",
+                                   "ceiling_bucket", "risk_bucket")} for q in result["payload"]]
+    pd.DataFrame(rows).to_csv(config.OUTPUT_DIR / "wr_projections.csv", index=False)
+
+    print("\nTop 8 (default weights):")
+    for q in result["payload"][:8]:
+        flag = " [NEW TEAM]" if q["mover"] else ""
+        adp = q.get("adp_label", "—")
+        tag = f" {q['value_tag'].upper()}" if q.get("value_tag") else ""
+        rs = f"{q['route_share']:.0%}" if q.get("route_share") is not None else "—"
+        ts = f"{q['target_share']:.1%}" if q.get("target_share") is not None else "—"
+        print(f"  {q['rank']:>2}. {q['name']:<22} {q['team']:<4} {q['proj_ppg']:>5.1f} pts/gm  "
+              f"rte {rs:<5} tgt% {ts:<6} tgt/g {str(q.get('targets_pg', '—')):<5} "
+              f"ADP {adp:<5} ceil {str(q.get('ceil', '—')):<5} "
+              f"risk:{q.get('risk_bucket', '?')}{tag}{flag}")
+    _refresh_site()
+    print("If any team or depth spot looks wrong, open current_map_debug_wr.txt and send it to me.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        import traceback as _tb
+        _p = config.OUTPUT_DIR / "current_map_debug_wr.txt"
+        with open(_p, "a", encoding="utf-8") as _f:
+            _f.write("\n\n=== ERROR during run ===\n" + _tb.format_exc())
+        print(f"\n[!] Something errored. Full traceback appended to {_p} — send me that file.")
+        raise

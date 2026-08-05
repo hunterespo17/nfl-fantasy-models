@@ -372,9 +372,32 @@ def injury_games(injury, pos: str = "RB"):
 # not 17 -- being as available as it is possible to be should score as no risk,
 # not as slightly risky.
 #
+# Receivers were fitted the same way and they need their own line, not the backs'.
+# Job size is targets per game over 9 -- an alpha's load. Fitted on 757 receiver
+# seasons in 2019-2023 and checked on the 329 in 2024-2025 the fit never saw, over
+# receivers already carrying the board's 8 career games. Average games missed:
+#
+#     3 years of games + job    3.82     <- this one
+#     3 years of games alone    3.95
+#     one flat average          4.51
+#     "everybody plays 17"      5.39
+#
+# Falling back to the backs' line here was doing real damage. It carries a bigger
+# job term than the receivers' does, and nothing on the receiver frame was filling
+# `job` in at all, so every receiver was priced as though he had no role. The best
+# a perfectly healthy one could reach was 12.5 games -- a 0.36 risk, above the
+# "misses games most years" bar -- and 110 of 128 receivers wore that chip,
+# including four projected for all 17. A warning that fires on 86% of a board is
+# not a warning.
+#
+# Receivers are also plainly more durable than backs, which the line now says: on
+# a near-perfect three-year record a receiver comes back for 14.4 games and
+# repeats 17 in 37% of cases, against 11.7% for backs.
+#
 #                  intercept  3yr avail   job
 BASE_FIT = {"RB": (3.66, 8.80, 2.77),
-            "QB": (0.56, 13.08, 1.18)}
+            "QB": (0.56, 13.08, 1.18),
+            "WR": (4.18, 7.96, 3.45)}
 BASE_DEFAULT = (3.66, 8.80, 2.77)
 BASE_MIN, BASE_MAX = 4.0, 17.0
 
@@ -389,10 +412,12 @@ RISK_CEILING, RISK_FLOOR = 15.0, 8.0
 #
 #     rookie backs with 50+ carries       n=79   13.8 games   (median 15)
 #     rookie passers with 100+ attempts   n=44   10.8 games   (median 10)
+#     rookie receivers with 30+ targets   n=115  14.7 games   (median 15)
 #
 # which makes sense. They are the freshest bodies in the league, and the reason
 # they got the job in the first place is usually that they were available for it.
-ROOKIE_GAMES = {"RB": 13.5, "QB": 10.5}
+# The receivers are the most available of the three, and by some distance.
+ROOKIE_GAMES = {"RB": 13.5, "QB": 10.5, "WR": 14.5}
 ROOKIE_DEFAULT = 13.5
 
 _HAND: dict[str, dict] = {}
