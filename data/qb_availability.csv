@@ -11,11 +11,25 @@
 #   expected_games   0 to 17, if you have a number in mind
 #   injury           what's wrong with him -- plain English, see the list below
 #   back_week        the week you think he's back. 1 = opening week
-#   note             shows on his row on the site. Keep it short
+#   note             shows on his row on the site. Keep it short. NO COMMAS
 #
 # THE SEASON STARTS IN SEPTEMBER. "Back in eight weeks" from a June operation
 # means he misses nothing. Same eight weeks from a camp injury costs him a
 # month. That's what back_week is for -- usually the easiest one to answer.
+#
+# BACK_WEEK 1 MEANS "HE'S FINE, BUT HE WASN'T". It is the one week number that
+# behaves differently, and this year it is doing most of the work on this page.
+# Every other week you type is a guess about a date that hasn't happened, so the
+# model argues with it using what players have really done coming off that
+# injury. Week 1 isn't a guess -- it's a thing you can see: off the PUP list,
+# taking first-team reps, nobody holding him back. So he keeps all 17 games and
+# the injury moves to his RISK instead.
+#
+# That matters more here than anywhere else on the board. Every quarterback
+# below is cleared and expected to start opening week, and not one of them loses
+# a game for it. Mahomes tore an ACL in December and is taking every first-team
+# rep in August; docking him games would be silly. Pretending the knee never
+# happened would be worse.
 #
 # You don't have to guess a games number. Type just the injury and the model
 # works it out from published NFL recovery research (cited in the code). Where
@@ -29,12 +43,20 @@
 #   foot, broken leg, hamstring, calf, quad, groin, hip, shoulder, labrum,
 #   ac joint, collarbone, pec, hand, thumb, wrist, concussion, back, neck, ribs
 #
-# Right now this file is empty on purpose -- nobody has reported an injury to a
-# starting quarterback, so nobody gets docked. Burrow and Daniels are NOT in
-# here, and that is correct: their injury history shows up as a risk warning on
-# their card, not as a smaller season. Add a line the first time one gets hurt:
+# Delete a row when he's a full year clear of it. An empty file is fine.
 #
-#   Joe Burrow,,thumb,5,thumb -- expected back in October
+# NOT IN HERE ON PURPOSE: nobody whose only problem is a job battle. Watson vs
+# Sanders and McCarthy vs Murray are depth-chart questions, and the board
+# already prices those. Stafford's missed practices are deliberate rest for a
+# 38-year-old, not an injury. Nobody in the league is on PUP at this position.
 #
-# Delete a row when he's healthy again. An empty file is fine.
+# Last checked: August 2026 camp reports.
 player,expected_games,injury,back_week,note
+Patrick Mahomes,,acl,1,torn ACL and LCL in December -- cleared and taking every first-team rep in a brace
+Daniel Jones,,achilles,1,torn Achilles in December -- fully practising and never placed on PUP
+Deshaun Watson,,achilles,1,Achilles fully healed -- back in a job battle rather than a recovery
+Bo Nix,,high ankle,1,broken ankle in January with a second operation in April -- full practice
+Joe Burrow,,turf toe,1,turf toe with ligament damage cost him 9 games -- healed and in a plated cleat
+Jayden Daniels,,knee,1,knee sprain and dislocated elbow held him to 6 games -- fully healthy
+Dak Prescott,,knee,1,knee soreness with nothing structural -- practising in a sleeve on a managed load
+Tua Tagovailoa,,back,1,back flare-up in late July -- resolved and back in full team drills

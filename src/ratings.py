@@ -376,6 +376,12 @@ def _flags(payload: list, pos: str, S: dict) -> None:
                 txt = (f"{inj}, ~{round(float(gm))} games" if inj
                        else f"Only {round(float(gm))} games")
                 dn.insert(0, ["warn", txt])
+            elif inj:
+                # Hurt AND cleared, so there are no games to take off him -- but
+                # "coming off an Achilles, full go" and "never got hurt" are not
+                # the same pick, and the card should not read as though they
+                # were. This chip is what keeps that difference on the row.
+                dn.insert(0, ["warn", f"{inj}, cleared to play"])
             if q.get("rookie"):
                 dn.insert(0, ["warn", "Rookie -- no NFL games"])
 
@@ -442,6 +448,12 @@ def _flags(payload: list, pos: str, S: dict) -> None:
         if q.get("games_note") and gm is not None:
             f.insert(0, ["warn", (f"{inj}, ~{round(float(gm))} games" if inj
                                   else f"Only {round(float(gm))} games")])
+        elif inj:
+            # Hurt AND cleared: nothing to dock, everything still to say. Half
+            # this position is coming off a knee or an Achilles this year and
+            # every one of them is a full seventeen games; without this chip the
+            # card would show no trace of it at all.
+            f.insert(0, ["warn", f"{inj}, cleared to play"])
         q["flags"] = f[:6]
 
 
@@ -555,7 +567,15 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
         # no longer does, so it is weighted to be felt -- a quarterback the fit
         # says lasts ten games gives up about a quarter of the available risk
         # score before anything else is counted.
-        hurt = float(q.get("avail_risk") or 0.0)
+        # Two ways to be a bad bet to be on the field and they are not the same
+        # sentence. `avail_risk` is his RECORD -- a body like this has not lasted
+        # a season in years. `injury_risk` is RIGHT NOW -- he tore something in
+        # December and the surgery was in February. A man can have either, both,
+        # or neither, and the worse of the two is the one that should price him:
+        # a spotless record does not undo an ACL, and being cleared does not undo
+        # five broken seasons.
+        hurt = max(float(q.get("avail_risk") or 0.0),
+                   float(q.get("injury_risk") or 0.0))
         # A premium pick is risky when it's shaky (weak floor AND/OR no ceiling to
         # justify it), a reach past the model, or unlikely to be on the field.
         # High ceiling meaningfully offsets. Cheap picks stay low-risk by

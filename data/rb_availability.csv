@@ -11,11 +11,20 @@
 #   expected_games   0 to 17, if you have a number in mind
 #   injury           what's wrong with him -- plain English, see the list below
 #   back_week        the week you think he's back. 1 = opening week
-#   note             shows on his row on the site. Keep it short
+#   note             shows on his row on the site. Keep it short. NO COMMAS
 #
 # THE SEASON STARTS IN SEPTEMBER. "Back in eight weeks" from a June operation
 # means he misses nothing. The same eight weeks from a camp injury costs him a
 # month. That is what back_week is for, and it's usually the easiest to answer.
+#
+# BACK_WEEK 1 MEANS "HE'S FINE, BUT HE WASN'T". It is the one week number that
+# behaves differently. Every other week you type is a guess about a date that
+# hasn't happened, so the model argues with it using what players have really
+# done coming off that injury. Week 1 isn't a guess -- it's a thing you can see:
+# off the PUP list, taking first-team reps, nobody holding him back. So he keeps
+# all 17 games and the injury moves to his RISK instead. That's how a man can be
+# a full-season projection and still not be the same bet as a man who was never
+# hurt at all. Most of the rows below are exactly that case.
 #
 # You don't have to guess a games number. Type just the injury and the model
 # works it out from what players have really done coming off that injury, using
@@ -30,10 +39,25 @@
 #   wrist, concussion, back, neck, ribs
 #
 # Anything else still works -- it just gets a generic injury instead of a
-# specific one. Delete a row when he's healthy again. An empty file is fine.
+# specific one. Delete a row when he's a full year clear of it. An empty file
+# is fine.
 #
 # ONLY PUT INJURIES HERE. "Third on the depth chart" is not an injury, and the
 # board already knows it from the depth chart. Type a backup in at six games and
-# you charge him twice for the same thing.
+# you charge him twice for the same thing. Warren, Etienne, Hubbard, Bigsby,
+# Braelon Allen and the rest of the committee backs are NOT in here on purpose,
+# and neither are Gibbs, Cook or Taylor -- those are contract hold-ins and they
+# are all perfectly healthy.
+#
+# Last checked: August 2026 camp reports.
 player,expected_games,injury,back_week,note
-Zach Charbonnet,11,knee,,knee -- may not be ready for week one
+Zach Charbonnet,,acl,7,torn ACL in January -- on the PUP list and targeting October
+Chris Rodriguez Jr.,,foot,2,foot surgery in June -- cleared but still out of team drills
+Jordan James,,ribs,2,fractured ribs in late July -- out about a month
+James Conner,,foot,1,foot surgery after a season-ending injury -- back at camp on a pitch count
+Cam Skattebo,,high ankle,1,broken fibula and dislocated ankle in October -- full go
+Quinshon Judkins,,high ankle,1,broken fibula and dislocated ankle in December -- full go
+RJ Harvey,,labrum,1,torn shoulder labrum repaired in January -- practising with no restrictions
+J.K. Dobbins,,lisfranc,1,Lisfranc in November -- cleared but carries re-injury risk
+Bucky Irving,,labrum,1,shoulder labrum surgery this offseason -- full go
+De'Von Achane,,shoulder,1,shoulder surgery this offseason -- full go

@@ -215,7 +215,26 @@ def source_label(adp_df: pd.DataFrame, pos: str | None = None) -> str:
 #    so the curve sits slightly optimistic at the late picks. Erring that way is
 #    the safe direction: it makes a late-round "value" tag harder to earn.
 HISTORY_FILE = "adp_history.csv"
-MIN_GAMES_HIST = 4      # a 1-2 game cameo is noise, not a season
+
+# How much season a player has to have played before his rate gets a vote on
+# what a pick at his price is worth.
+#
+# This was 4, and four is not a season. It let a back who tore something in
+# week 3 report a two-game rate, put up hurt, into the average for his whole
+# price bracket -- and there are enough of those to matter. Raising it to eight
+# lifted the curve about half a point through the early and middle picks AND
+# improved the fit, which is how you know the short years were noise and not
+# signal: throwing data away is only supposed to make a fit worse.
+#
+# Eight is not a new idea here. It is already the bar for the cross-season
+# reference pool in both blends and for the elite-finish check. One standard.
+#
+# It has to match calibration.MIN_GAMES, and for a real reason, not tidiness.
+# The worth-the-pick column is a subtraction: what we project him for, minus
+# what this curve says his price returns. Hold the two sides to different
+# standards and the difference between the standards shows up as a lean on
+# every player -- everyone a value, or everyone a reach. Change one, change both.
+MIN_GAMES_HIST = 8
 
 
 def load_adp_history(path=None) -> pd.DataFrame:

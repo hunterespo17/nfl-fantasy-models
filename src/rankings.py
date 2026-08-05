@@ -23,6 +23,44 @@ import pandas as pd
 
 from . import config
 
+# ---------------------------------------------------------------------------
+# WHAT A WEEK HE MISSES IS ACTUALLY WORTH TO YOU
+# ---------------------------------------------------------------------------
+# This is the one number that decides how far a hurt player falls, and it is a
+# judgement, so it lives on its own line where you can argue with it.
+#
+# The board's whole job is to say what a man is worth WHEN HE PLAYS. That is the
+# point of the model and nothing here changes it: his points-per-game is his
+# rate, healthy, full stop. The question this number answers is different -- on
+# draft day, what is the season worth?
+#
+# Start with what is obviously true. A back down for six weeks does not score
+# zero in those weeks, because you start somebody else, and this board already
+# prices somebody else: he is the free agent every Over-replacement number is
+# measured against. So the six weeks are worth replacement, not nothing.
+#
+# But they are not worth FULL replacement either, and pretending they are is how
+# a man missing a third of the year moves one single spot on the board. Four
+# things you don't get back:
+#
+#   THE ROSTER SPOT. You hold him from August to November. That bench slot spent
+#   six weeks doing nothing while everyone else's was catching the waiver hit of
+#   the year.
+#   THE TIMING. He misses the START. Replacement level is what the free agent
+#   pool averages over a season; in September you are picking from what is left
+#   after eleven other people panicked, and you are doing it blind.
+#   THE ONE-SIDED CALENDAR. A October target becomes November. It never becomes
+#   September. Every surprise about a return date points the same way.
+#   THE RAMP. He comes back on a snap count and splits the backfield for a
+#   fortnight. His rate says 10.3; his first two games back are not 10.3.
+#
+# Two thirds is the honest split of those. Turn it DOWN toward 0 and the board
+# stops trusting hurt players at all; turn it UP toward 1 and it goes back to
+# treating a missed week as a free swap. It only ever touches players somebody
+# has actually reported an injury on -- for the other 99 rows the term is zero,
+# because 17 minus 17 is 17 minus 17.
+MISSED_WEEK_VALUE = 0.65
+
 
 def replacement_ranks(league: dict | None = None) -> dict[str, int]:
     """
@@ -108,7 +146,7 @@ def build_rankings(
         fill.loc[sub.index] = np.minimum(float(rates[r - 1]), sub[ppg_col].astype(float))
 
     df["proj_points_total"] = (df[ppg_col] * df[games_col]
-                               + fill * (full - df[games_col]))
+                               + fill * (full - df[games_col]) * MISSED_WEEK_VALUE)
 
     frames = []
     for pos, sub in df.groupby("position"):

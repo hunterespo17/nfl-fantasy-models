@@ -49,6 +49,25 @@ our factors rank Nth gets what the market's Nth pick is expected to return. Same
 idea as the line, with the freedom to be steeper at the top and flatter at the
 bottom, which is where real scoring actually lives.
 
+Bug 3: the wrong seasons
+------------------------
+The curve answers "what does a pick this expensive return per game". Every
+drafted season went into that average, including the ones that ended in October.
+A back who tore an ACL in week 3 and limped through two games on his way out
+counts the same as a back who played sixteen -- and his two-game rate, put up
+hurt, drags the average for his whole price bracket down.
+
+That is the wrong question. Points per game on this board means what a player is
+worth WHEN HE PLAYS; the games he misses are charged separately and in full, in
+the season total. So the same rule has to hold on the other side of the
+subtraction: a season only gets a vote on the curve if it was long enough to be
+a season. Below MIN_GAMES it is not evidence about a rate, it is evidence about
+an injury, and the injury is already paid for elsewhere.
+
+Requiring it lifts the whole points column by roughly half a point through the
+middle rounds AND fits better than the version that let the short years in --
+which is the tell that they were noise rather than signal.
+
 Fitted against the ADP curve, deliberately, and not against raw scoring. Raw
 scoring includes the one lucky season somebody had; the curve is what a pick at
 that price returns on average. Matching it means the projection column claims
@@ -94,6 +113,11 @@ import pandas as pd
 # all-players fit instead. Two numbers off forty rows is already generous; the
 # real files carry 276 (RB) and 95 (QB).
 MIN_ROWS = 40
+
+# Bug 3 (see docstring): a season has to be a real season before it gets a vote
+# on what a pick at that price is worth. Eight games is the same bar the rest of
+# the model already uses for "enough of a year to read".
+MIN_GAMES = 8
 
 # How many bends in the conversion. Enough to follow the curve's shape, few
 # enough that each one still sits on ~a dozen real players instead of tracking
@@ -196,6 +220,19 @@ def fit(p: pd.DataFrame, pos: str = "RB",
                      "anchor": "all players", "knots": [], "shape": "line"})
     if len(d) < 5:
         return 0.0, 0.25  # harmless fallback: an empty board beats a crash
+
+    # ---- bug 3: a rate needs a real season behind it -----------------------
+    # Guarded, not assumed: if the column isn't there, or throwing the short
+    # years out would leave too little to fit, the old behaviour stands. Better
+    # a slightly low curve than a curve built on thirty rows.
+    if "actual_games" in d.columns:
+        g = pd.to_numeric(d["actual_games"], errors="coerce")
+        full = d[g >= MIN_GAMES]
+        if len(full) >= MIN_ROWS:
+            if info is not None:
+                info.update({"n_short_dropped": int(len(d) - len(full)),
+                             "min_games": MIN_GAMES})
+            d = full
 
     # ---- bug 1: fit on the crowd the ADP curve was built from --------------
     picks = drafted_picks(pos)

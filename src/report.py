@@ -991,16 +991,25 @@ function replRate(pos){
   const rates=qs.map(x=>rateIn(x,ctx)).sort((a,b)=>b-a);
   return rates[Math.min(replIndex(pos),rates.length-1)];
 }
+/* ...but nor are they worth FULL replacement, and pretending they are is how a
+   man missing a third of the season moves one single spot. You hold his bench
+   slot for six weeks; he misses the START, when the pool is whatever eleven
+   other people left behind; a return date only ever slips later, never earlier;
+   and he comes back on a snap count, so his first fortnight isn't his rate
+   either. Two thirds is the honest split. Must match MISSED_WEEK_VALUE in
+   src/rankings.py -- that one ranks the printed CSV, this one ranks the page,
+   and they have to agree. */
+const MISSED_WEEK_VALUE=0.65;
 /* Only ever runs for somebody who is actually missing time -- one or two rows
    on a hundred-row board -- so walking the board to find replacement is cheap. */
 function blendAvail(rate,q,pos){
   const a=availOf(q);
-  return a>=1?rate:rate*a+Math.min(replRate(pos),rate)*(1-a);
+  return a>=1?rate:rate*a+Math.min(replRate(pos),rate)*(1-a)*MISSED_WEEK_VALUE;
 }
 /* What the board sorts on: the rate, discounted for the games we don't expect
-   to get, with those games credited at replacement. Same units as projOf, so
-   replacement level, VOR and the tier gaps all keep meaning exactly what they
-   meant before this existed. */
+   to get, with those games credited at a bit under replacement. Same units as
+   projOf, so replacement level, VOR and the tier gaps all keep meaning exactly
+   what they meant before this existed. */
 function valOf(q){return blendAvail(projOf(q),q,POS);}
 
 /* --- pricing a player on a board that isn't the one on screen -------------

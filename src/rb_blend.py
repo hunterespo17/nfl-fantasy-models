@@ -176,7 +176,8 @@ SIGNALS = {
     "durability": "Durability (games/17)",
     "plays_pg": "Team plays/gm",
     "pass_rate": "Team pass rate",
-    "implied_total_avg": "Team implied total",
+    "implied_total_avg": "Team implied total (last yr)",
+    "implied_fwd": "Vegas implied points/gm",
     "points_pg": "Team points/gm",
     "win_total": "Vegas win total",
     "clay_rank": "Outside guide's RB rank",
@@ -217,7 +218,7 @@ GROUPS = list(DEFAULT_WEIGHTS.keys())
 # Reuse the QB model's file loaders rather than keeping two copies of them --
 # win totals and play-callers are league-wide facts, not position-specific.
 from .qb_blend import (  # noqa: E402
-    _birth_map, _first, _num, _numf, _pct_of, playcallers, win_totals,
+    _birth_map, _first, _num, _numf, _pct_of, implied_totals, playcallers, win_totals,
 )
 
 __all__ = [
@@ -226,7 +227,7 @@ __all__ = [
     "season_aggregates", "entering_profiles", "attach_role_window",
     "add_indices", "composite",
     "calibrate", "backtest", "run", "run_upcoming", "build_upcoming",
-    "win_totals", "playcallers", "depth_history",
+    "win_totals", "implied_totals", "playcallers", "depth_history",
 ]
 
 
@@ -674,9 +675,18 @@ def entering_profiles(sa: pd.DataFrame, team_season: pd.DataFrame,
                 "season": season,
                 "team": cur["team"],
                 "actual_ppg": float(cur["total_fp_pg"]),
+                # How much season is behind that rate. NOT a factor -- nothing
+                # scores it, nothing ranks on it. calibration.py reads it to
+                # throw out the years that ended in October before working out
+                # what a pick at a given price returns per game.
+                "actual_games": float(cur.get("games", np.nan)),
                 "age": season - birth.get(str(pid), np.nan),
                 "durability": b["prev_games"] / 17.0,
                 "win_total": win_totals().get((season, cur["team"])),
+                # Vegas's own number for how many points this team scores, from
+                # the lines posted for the front of THIS season -- not from what
+                # the team scored last year.
+                "implied_fwd": implied_totals().get((season, cur["team"])),
                 **b,
             })
     prof = pd.DataFrame(rows)
@@ -978,24 +988,45 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
         p["Backfield"] = _share
 
     p["Efficiency"] = pd.concat([pct("ypc"), pct("ypt")], axis=1).mean(axis=1)
-    p["Vegas"] = pd.concat([pct("win_total"), pct("implied_total_avg")], axis=1).mean(axis=1)
+    # Vegas: the preseason win total and Vegas's implied points for the front of
+    # the season. Both are forward-looking, which is the point.
+    #
+    # The second half of this used to be implied_total_avg -- LAST season's
+    # average implied total, attached through _merge_team_env's prev_season
+    # join. That is a fine description of where a team has been and a poor one
+    # of where it is going: against what a backfield actually scored it reads
+    # r=+0.24, where the posted lines for the coming season read r=+0.33. Same
+    # source, same kind of number, one season later, and it is the only one of
+    # the two that a drafter in August could not have looked up for himself.
+    #
+    # Weight stays at 10 of 100 and it enters as a percentile, so this steers
+    # the ordering without being allowed to set the level of anyone's points.
+    p["Vegas"] = pd.concat([pct("win_total"), pct("implied_fwd")], axis=1).mean(axis=1)
     # Situation for a back is pace plus run lean -- more snaps and more handoffs.
     # Note the sign flip against the QB model: a pass-happy offense helps a
     # quarterback and (mostly) hurts a runner, so pass rate enters negated.
     if "pass_rate" in p.columns:
         p["neg_pass"] = -pd.to_numeric(p["pass_rate"], errors="coerce")
     p["Situation"] = pd.concat([pct("plays_pg"), pct("neg_pass")], axis=1).mean(axis=1)
-    # Availability was age x durability, and both of those look backwards. The
-    # games ratio is the forward-looking third term. It is in here as WELL as in
-    # the games count on purpose: a back coming off a knee is usually worth a
-    # little less in the games he does play -- he ramps up, he splits the work
-    # while he proves it -- so the news should cost him twice, gently, rather
-    # than once, hard. At 10% of the blend this is the gentle half.
-    _gr = (pd.to_numeric(p["games_ratio"], errors="coerce").fillna(1.0)
-           if "games_ratio" in p.columns else pd.Series(1.0, index=p.index))
+    # Age curve x last year's durability. Both look backwards, and that is the
+    # whole of it -- NOTE WHAT IS DELIBERATELY NOT IN HERE: this year's news.
+    #
+    # It used to be. The games ratio was multiplied in as a third term, on the
+    # argument that a back coming off a knee is worth a little less in the games
+    # he DOES play, because he ramps up and splits the work while he proves it.
+    # That argument is true. It is just already paid for, one line down in
+    # rankings.py, where a missed week is charged at MISSED_WEEK_VALUE and the
+    # ramp is one of the four reasons that number is not 1.0. Leaving it here too
+    # billed the same injury twice.
+    #
+    # And billing it here specifically is the wrong place, because this index
+    # feeds the points-per-game figure, and points-per-game is the one number on
+    # this whole board that is meant to answer "what is he worth WHEN HE PLAYS".
+    # A hurt man's rate is his rate. What a shorter season costs you belongs in
+    # the season total, where you can see it, and it is charged there in full.
     p["Availability"] = [
-        _age_curve(a) * (d if pd.notna(d) else 0.8) * 100 * r
-        for a, d, r in zip(p["age"], p["durability"], _gr)
+        _age_curve(a) * (d if pd.notna(d) else 0.8) * 100
+        for a, d in zip(p["age"], p["durability"])
     ]
     p["Matchup"] = 50.0
 
@@ -1186,6 +1217,11 @@ def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
             # which is where an injury history belongs. See src/availability.py.
             "avail_games": _r(row, "avail_games", 1),
             "avail_risk": _r(row, "avail_risk", 2),
+            # And what he is carrying INTO the season, which is a separate thing
+            # from his record. Zero for anyone nobody has reported on. A man who
+            # has been cleared keeps all seventeen games and still scores here,
+            # because "cleared" and "never hurt" are different bets.
+            "injury_risk": _r(row, "injury_risk", 2),
             # How many of the 17 we expect him to play, why, and what an outside
             # guide thinks of him. `games` is the one the page ranks on, and it
             # is seventeen unless somebody reported something specific.
@@ -1279,6 +1315,7 @@ def build_upcoming(sa, team_season, players, current_map, season,
             "age": season - birth.get(pid, np.nan),
             "durability": b["prev_games"] / 17.0,
             "win_total": win_totals().get((season, cm.get("team"))),
+            "implied_fwd": implied_totals().get((season, cm.get("team"))),
             "is_starter": cm.get("is_starter"),
             "depth_rank": cm.get("depth_rank"),
             **b,

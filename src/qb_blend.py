@@ -75,7 +75,8 @@ SIGNALS = {
     "proj_games": "Games this board expects",
     "pass_rate": "Team pass rate",
     "plays_pg": "Team plays/gm",
-    "implied_total_avg": "Team implied total",
+    "implied_total_avg": "Team implied total (last yr)",
+    "implied_fwd": "Vegas implied points/gm",
     "points_pg": "Team points/gm",
     "sack_rate": "Sack rate allowed",
     "wrte_rec_yds_pg": "WR/TE yds/gm",
@@ -107,6 +108,62 @@ def win_totals() -> dict:
         except Exception:
             _WT_CACHE = {}
     return _WT_CACHE
+
+
+# The other half of "what does Vegas think of this team" -> posted game totals
+# and spreads, which sit in data/raw/schedules.csv for every season back to 1999.
+_IT_CACHE = None
+
+# How many weeks of posted lines to average.
+#
+# Two, and the reason is the whole design. A team's implied total is half the
+# game total plus half the spread, so ONE line is as much about the opponent as
+# about the team; averaging two roughly halves that noise. Going further is
+# where it stops being honest: week 3 and week 4 numbers get set after the
+# season has started, so they already know how the team looks. Measured against
+# what a backfield actually scored, 2021-2025:
+#
+#     week 1 only            r = +0.28
+#     weeks 1-2              r = +0.33   <- this
+#     weeks 1-4              r = +0.37   (but weeks 3-4 have seen real games)
+#     LAST season's average  r = +0.24   <- what this factor used to run on
+#
+# So even the clean two-week window reads the coming season better than the
+# backward-looking input it replaces, and it does it without hindsight.
+FWD_LINE_WEEKS = 2
+
+
+def implied_totals() -> dict:
+    """{(season, team): implied points/gm} from the first FWD_LINE_WEEKS posted lines.
+
+    Forward-looking on purpose. Same swallow-everything contract as win_totals():
+    if the file is missing or malformed this returns {} and the Vegas factor
+    quietly falls back to the win total alone rather than taking the board down.
+    """
+    global _IT_CACHE
+    if _IT_CACHE is None:
+        from . import config
+        try:
+            s = pd.read_csv(config.RAW_DIR / "schedules.csv",
+                            usecols=["season", "week", "game_type", "home_team",
+                                     "away_team", "total_line", "spread_line"])
+            s = s[s["game_type"].astype(str).str.upper() == "REG"]
+            for c in ("season", "week", "total_line", "spread_line"):
+                s[c] = pd.to_numeric(s[c], errors="coerce")
+            s = s[(s["week"] <= FWD_LINE_WEEKS) & s["total_line"].notna()
+                  & s["spread_line"].notna()]
+            # spread_line is quoted from the home side, so the home team's share
+            # of the total is (total + spread)/2 and the road team gets the rest.
+            home = pd.DataFrame({"season": s["season"], "team": s["home_team"],
+                                 "it": (s["total_line"] + s["spread_line"]) / 2.0})
+            away = pd.DataFrame({"season": s["season"], "team": s["away_team"],
+                                 "it": (s["total_line"] - s["spread_line"]) / 2.0})
+            both = pd.concat([home, away], ignore_index=True)
+            g = both.groupby(["season", "team"])["it"].mean()
+            _IT_CACHE = {(int(k[0]), str(k[1])): float(v) for k, v in g.items()}
+        except Exception:
+            _IT_CACHE = {}
+    return _IT_CACHE
 
 
 # Who actually calls the offensive plays -> data/playcallers.csv. Hand-maintained,
@@ -351,11 +408,19 @@ def entering_profiles(sa: pd.DataFrame, team_season: pd.DataFrame,
                 "season": season,
                 "team": cur["team"],
                 "actual_ppg": float(cur["total_fp_pg"]),
+                # Same as src\rb_blend.py: how much season is behind that rate.
+                # Not a factor. calibration.py uses it to drop the years that
+                # ended early before fitting what a pick is worth per game.
+                "actual_games": float(cur.get("games", np.nan)),
                 "age": season - birth.get(str(pid), np.nan),
                 "durability": b["prev_games"] / 17.0,
                 "rush_pct": _pct_of(pool_rush, b["rush_val"]),
                 "pass_pct": _pct_of(pool_pass, b["pass_val"]),
                 "win_total": win_totals().get((season, cur["team"])),
+                # Vegas's own number for how many points this team scores, taken
+                # from the lines posted for the front of THIS season -- not from
+                # what the team scored last year.
+                "implied_fwd": implied_totals().get((season, cur["team"])),
                 **b,
             })
     prof = pd.DataFrame(rows)
@@ -408,19 +473,29 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
         p["Rushing"] = _rush_prod        # older cache without carries: production only
     p["Situation"] = pd.concat([pct("pass_rate"), pct("proe"), pct("plays_pg")], axis=1).mean(axis=1)
     p["Scoring env"] = pd.concat([pct("implied_total_avg"), pct("points_pg")], axis=1).mean(axis=1)
-    p["Vegas"] = pct("win_total")            # forward-looking team quality (preseason win total)
+    # Forward-looking team quality: the preseason win total AND Vegas's implied
+    # points for the front of the season. Two different questions -- how often
+    # do they win, how much do they score -- and the second one is the one a
+    # fantasy scorer actually gets paid on, so it belongs in here rather than
+    # being represented only by last year's box score in "Scoring env".
+    p["Vegas"] = pd.concat([pct("win_total"), pct("implied_fwd")], axis=1).mean(axis=1)
     if "sack_rate" in p.columns:
         p["neg_sack"] = -p["sack_rate"]
     p["Cast & OL"] = pd.concat([pct("wrte_rec_yds_pg"), pct("neg_sack")], axis=1).mean(axis=1)
-    # Age curve and last year's durability, times what we hear about this year.
-    # The injury costs him twice on purpose and both charges are small: once here
-    # (6 of 100 weight, so a month missed is worth well under a point of
-    # composite) and once through proj_games below, which is where the real
-    # markdown happens. This one is the "and he's a health risk generally" nudge;
-    # that one is the arithmetic of a shorter season.
+    # Age curve and last year's durability. Both look backwards on purpose, and
+    # THIS YEAR'S NEWS IS DELIBERATELY NOT IN HERE.
+    #
+    # It used to be -- the games ratio was multiplied in, so an injury was billed
+    # twice: a small nudge here and the real markdown in the season total. The
+    # small nudge is now gone, because it was landing in the wrong column. This
+    # index feeds points-per-game, and points-per-game is the number that answers
+    # "what is he worth WHEN HE PLAYS" -- the point of the whole board. Burrow's
+    # rate is Burrow's rate whether he plays eight games or eighteen. What a
+    # shorter season costs you is charged once, in the season total, where you can
+    # see the arithmetic. Same change as src\rb_blend.py; keep the two in step.
     p["Availability"] = [
-        _age_curve(a) * (d if pd.notna(d) else 0.8) * 100 * gr
-        for a, d, gr in zip(p["age"], p["durability"], p["games_ratio"])
+        _age_curve(a) * (d if pd.notna(d) else 0.8) * 100
+        for a, d in zip(p["age"], p["durability"])
     ]
     p["Matchup"] = 50.0
 
@@ -531,6 +606,12 @@ def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
                             if pd.notna(row.get("avail_games")) else None),
             "avail_risk": (round(float(row["avail_risk"]), 2)
                            if pd.notna(row.get("avail_risk")) else None),
+            # And what he is carrying INTO this season, separately from his
+            # record. Half the position is coming off something this year and
+            # all of them are cleared for week one, so all of them keep a full
+            # seventeen games -- this is the only column that remembers why.
+            "injury_risk": (round(float(row["injury_risk"]), 2)
+                            if pd.notna(row.get("injury_risk")) else None),
             # How much of the season we expect to get, why, and where an outside
             # guide has him. Seventeen unless somebody reported something.
             "games": round(float(row.get("proj_games", 17.0)), 1),
@@ -617,6 +698,7 @@ def build_upcoming(sa, team_season, players, current_map, season, pool) -> tuple
             "rush_pct": _pct_of(pool_rush, b["rush_val"]),
             "pass_pct": _pct_of(pool_pass, b["pass_val"]),
             "win_total": win_totals().get((season, cm.get("team"))),
+            "implied_fwd": implied_totals().get((season, cm.get("team"))),
             "is_starter": cm.get("is_starter"),
             "depth_rank": cm.get("depth_rank"),
             **b,

@@ -80,6 +80,19 @@ GUIDE_FLOOR = 8.0
 # that talks in weeks is counted from week one, never from today.
 SEASON_WEEKS = 17.0
 
+# CARRYING AN INJURY IS NOT THE SAME WORRY AS HAVING A HISTORY OF THEM, so it
+# gets its own 0-to-1 score instead of being jammed into the history one. It is
+# read straight off how long the injury takes -- INJURY_RECOVERY's `weeks` over
+# a year -- because time out is the best single proxy anyone has for how much of
+# him is still missing. A torn ACL scores 1, a bruised rib scores 0.08.
+INJURY_RISK_WEEKS = 48.0
+
+# Once he is practising in full the recovery window is behind him, and what is
+# left is the chance of a setback: real, but not the same thing. Mahomes took
+# every first-team rep in August; pricing him as though the December knee were
+# still open would be silly. So a cleared man carries half the score.
+CLEARED_RISK = 0.5
+
 
 # ---------------------------------------------------------------------------
 # WHAT AN INJURY ACTUALLY COSTS
@@ -529,7 +542,7 @@ def resolve(pos: str, player_id, name: str, is_upcoming: bool,
     out = {"clay_rank": g["rank"] if g else np.nan,
            "clay_games": g["games"] if g else np.nan,
            "news_games": np.nan, "games_ratio": 1.0, "games_note": "",
-           "injury": ""}
+           "injury": "", "injury_risk": 0.0, "cleared": False}
     if not is_upcoming:
         return out
 
@@ -537,6 +550,17 @@ def resolve(pos: str, player_id, name: str, is_upcoming: bool,
     wts: list[float] = []
     why: list[str] = []
     mine = hand_notes(pos).get(norm(str(name))) or {}
+
+    # WEEK ONE IS A DIFFERENT KIND OF STATEMENT FROM ANY OTHER WEEK. Every other
+    # back_week is your estimate of a date that has not happened yet, and the
+    # injury table is entitled to argue with it. "Back for week one" is not an
+    # estimate -- it is a thing you can see: off the PUP list, taking first-team
+    # reps, no restriction. The table exists to guess that outcome, so once the
+    # outcome is visible the table has nothing left to say and he keeps all
+    # seventeen games. The injury is still recorded; it just goes where "cleared,
+    # but it was an ACL in December" actually belongs, which is the risk column.
+    cleared = mine.get("back_week") == 1.0
+    out["cleared"] = bool(cleared)
 
     # 1. YOU. A games count and a week-he's-back are both direct statements, so
     #    if you gave both they average at your weight rather than fighting.
@@ -547,16 +571,21 @@ def resolve(pos: str, player_id, name: str, is_upcoming: bool,
         vals.append(float(np.mean(yours)))
         wts.append(SOURCE_W["hand"])
 
-    # 2. THE INJURY HE IS CARRYING.
+    # 2. THE INJURY HE IS CARRYING. Always sets the risk score and the label. It
+    #    only moves his GAMES if he is not already cleared to play.
     ig, iw, ilabel = injury_games(mine.get("injury"), pos)
     if ig is not None:
-        vals.append(ig)
-        wts.append(SOURCE_W["injury"])
         out["injury"] = ilabel
-        why.append(f"coming off a {ilabel}")
+        risk = float(np.clip(float(iw) / INJURY_RISK_WEEKS, 0.0, 1.0))
+        out["injury_risk"] = risk * CLEARED_RISK if cleared else risk
+        if not cleared:
+            vals.append(ig)
+            wts.append(SOURCE_W["injury"])
+            why.append(f"coming off a {ilabel}")
 
-    # 3. THE GUIDE -- news only, never a depth-chart statement.
-    if g is not None and GUIDE_FLOOR <= g["games"] < 17:
+    # 3. THE GUIDE -- news only, never a depth-chart statement, and never over
+    #    the top of a man you have watched practise.
+    if g is not None and GUIDE_FLOOR <= g["games"] < 17 and not cleared:
         vals.append(float(g["games"]))
         wts.append(SOURCE_W["guide"])
         why.append(f"the guide has him down for {int(round(g['games']))}")
@@ -595,6 +624,12 @@ def attach(p: pd.DataFrame, pos: str, news_w: float = 1.0,
     `avail_games` and `avail_risk` are the history: how long a body like his
     normally lasts, and that expressed as a 0-to-1 worry score. They move his
     RISK rating and nothing else -- see the rule at the top of the file.
+
+    `injury_risk` is the fifth, and it is the one that stops a cleared player
+    reading as a healthy one. A man who tore an ACL in December and is taking
+    every rep in August gets all seventeen games -- there is nothing to dock --
+    but he is not the same bet as a man who never got hurt, and this is where
+    that difference lives.
     """
     if p.empty:
         return p
@@ -603,7 +638,8 @@ def attach(p: pd.DataFrame, pos: str, news_w: float = 1.0,
             for pid, nm, u in zip(p["player_id"], p["player_name"], up)]
     for col, typ in (("clay_rank", float), ("clay_games", float),
                      ("news_games", float), ("games_ratio", float),
-                     ("games_note", object), ("injury", object)):
+                     ("games_note", object), ("injury", object),
+                     ("injury_risk", float), ("cleared", bool)):
         p[col] = pd.Series([r[col] for r in rows], index=p.index, dtype=typ)
 
     # A full season until something says otherwise. `news_games` is the mixed
