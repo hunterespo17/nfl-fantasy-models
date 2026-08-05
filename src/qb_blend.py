@@ -35,7 +35,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from . import archetype, calibration, rankings, scoring
+from . import archetype, availability, calibration, rankings, scoring
 
 # --- Model constants (validated on real QB seasons) -------------------------
 K_TD = 8.0          # TD regression: games needed to fully trust observed TDs
@@ -43,6 +43,22 @@ K_CAREER = 12.0     # sample-size regression: shrink strength on career games
 HEALTHY_GAMES = 12  # a "healthy" season is at least this many games played
 RECENCY = 5         # never reach back more than this many seasons for talent
 RUSH_VOL_W = 0.5    # Rushing index: share given to attempt VOLUME vs production
+
+# --- Will he be on the field in September? ----------------------------------
+# The same treatment the running backs get, for the same reason: a draft pick
+# buys a season, not a rate. A quarterback expected to miss a month is worth less
+# than the identical quarterback who isn't, and until now this board could not
+# see the difference. The mechanics live in src/availability.py, and the long
+# note on why a stated games count is taken at FACE VALUE rather than hedged sits
+# above NEWS_W in rb_blend.py -- it applies here word for word.
+#
+# One quarterback-specific wrinkle worth writing down. A hurt QB and a hurt RB do
+# not cost you the same thing: miss six games as a back and your bench absorbs
+# it, miss six as a quarterback and the one starting spot on your roster is empty
+# for six weeks. Less slack behind the position, not more -- which is the
+# argument for taking a QB's missed time just as seriously, not less so.
+NEWS_W = 1.0
+MIN_GAMES_RATIO = 0.35
 
 # Raw signals surfaced in each QB's detail panel, with friendly labels.
 SIGNALS = {
@@ -54,6 +70,9 @@ SIGNALS = {
     "career_games": "Career games",
     "age": "Age",
     "durability": "Durability (games/17)",
+    "clay_rank": "Outside guide's QB rank",
+    "clay_games": "Games the outside guide expects",
+    "proj_games": "Games this board expects",
     "pass_rate": "Team pass rate",
     "plays_pg": "Team plays/gm",
     "implied_total_avg": "Team implied total",
@@ -275,6 +294,22 @@ def _bundle(pdf: pd.DataFrame, as_of: int) -> dict | None:
         "healthy_recent": bool(len(healthy) > 0),
         "prev_ppg": float(prior_sorted["total_fp_pg"].iloc[-1]),
         "prev_games": float(prior_sorted["games"].iloc[-1]),
+        # Games a season over his last three, not just last year's. This is the
+        # single biggest thing separating a quarterback who got hurt from one who
+        # is simply not durable, and it matters more here than anywhere else: a
+        # passer who misses six weeks empties the one starting spot on your
+        # roster. On seasons the fit never saw it cuts the miss from 3.67 games
+        # to 3.38. Only availability.py reads it; the Availability index still
+        # uses last season, so fresh news still moves a rank faster than a mean.
+        "prev_games3": float(prior_sorted["games"].tail(3).mean()),
+        # How big last season's job was, on a 0-to-1 scale where 1 is a full
+        # starter's 32 throws a game. Only used to work out how many games he
+        # plays NEXT year: a starter who missed six weeks hurt and a backup who
+        # got six weeks of mop-up both show up as "played 11", and the games
+        # model cannot tell them apart without this. See availability.py.
+        "prev_role": float(np.clip(
+            (float(prior_sorted["attempts"].iloc[-1])
+             / max(float(prior_sorted["games"].iloc[-1]), 1.0)) / 32.0, 0.0, 1.0)),
         "prev_team": prior_sorted["team"].iloc[-1],
     }
 
@@ -337,6 +372,10 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     weights = weights or DEFAULT_WEIGHTS
     p = prof.copy()
 
+    # What we expect to get out of him THIS year. Upcoming season only, so a 2026
+    # injury report can never leak backwards into a backtest scored on 2019.
+    p = availability.attach(p, "QB", NEWS_W, MIN_GAMES_RATIO)
+
     # Sample-size regression: shrink talent toward each season-cohort's mean by
     # how thin the career is (few games -> pulled to the pack).
     pool_mean = p.groupby("season")["talent_reg"].transform("mean")
@@ -373,9 +412,15 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     if "sack_rate" in p.columns:
         p["neg_sack"] = -p["sack_rate"]
     p["Cast & OL"] = pd.concat([pct("wrte_rec_yds_pg"), pct("neg_sack")], axis=1).mean(axis=1)
+    # Age curve and last year's durability, times what we hear about this year.
+    # The injury costs him twice on purpose and both charges are small: once here
+    # (6 of 100 weight, so a month missed is worth well under a point of
+    # composite) and once through proj_games below, which is where the real
+    # markdown happens. This one is the "and he's a health risk generally" nudge;
+    # that one is the arithmetic of a shorter season.
     p["Availability"] = [
-        _age_curve(a) * (d if pd.notna(d) else 0.8) * 100
-        for a, d in zip(p["age"], p["durability"])
+        _age_curve(a) * (d if pd.notna(d) else 0.8) * 100 * gr
+        for a, d, gr in zip(p["age"], p["durability"], p["games_ratio"])
     ]
     p["Matchup"] = 50.0
 
@@ -449,8 +494,15 @@ def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
     knots = ((extra or {}).get("calibration") or {}).get("knots") or []
     cur["proj_ppg"] = calibration.apply(cur["composite"], a, b, knots)
     cur["position"] = "QB"
+    # Rank on the SEASON, not the rate. proj_ppg is what he scores in a game he
+    # plays; proj_ppg * proj_games is what the pick is actually worth. They are
+    # the same number for everyone healthy, which is nearly everyone.
+    if "proj_games" not in cur.columns:
+        cur["proj_games"] = 17.0
+    cur["proj_games"] = pd.to_numeric(cur["proj_games"], errors="coerce").fillna(17.0).clip(1.0, 17.0)
     board = rankings.build_rankings(
-        cur[["player_id", "player_name", "position", "proj_ppg"]], ppg_col="proj_ppg"
+        cur[["player_id", "player_name", "position", "proj_ppg", "proj_games"]],
+        ppg_col="proj_ppg", games_col="proj_games",
     )
     by_id = {r["player_id"]: r for r in cur.to_dict("records")}
     payload = []
@@ -470,6 +522,11 @@ def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
             "vor": round(float(r["vor"]), 1),
             "career_games": (round(float(row["career_games"])) if pd.notna(row.get("career_games")) else None),
             "age": (round(float(row["age"])) if pd.notna(row.get("age")) else None),
+            # How much of the season we expect to get, why, and where an outside
+            # guide has him. The page reads all three straight off the row.
+            "games": round(float(row.get("proj_games", 17.0)), 1),
+            "games_note": (str(row.get("games_note") or "") or None),
+            "clay_rank": (int(row["clay_rank"]) if pd.notna(row.get("clay_rank")) else None),
             # Explicit numeric fields (not just SIGNALS, which is label-keyed) so
             # ratings.py can test the published rushing thresholds directly.
             # "pace" = per-game extrapolated to a 17-game season, which is how the

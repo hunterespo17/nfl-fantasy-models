@@ -19,9 +19,17 @@ What's different about running backs, and why:
     counted weighted, not raw. A back with 12 carries and 5 targets is a bigger
     asset than one with 20 carries and none, and raw touch counts say the
     opposite.
-  * BACKS AGE EARLY. The age curve peaks at 22-25 and falls off a cliff after
-    26. That isn't a hunch -- 85% of league-winning RB seasons came from backs
-    27 or younger, average 25.1.
+  * THE JOB IS KNOWN BEFORE THE SEASON STARTS. Where a back sits on the depth
+    chart in August, multiplied by how much work that offense's backfield
+    actually gets, is the Role factor. It is not a guess about the future --
+    it is a fact about the present that last year's box score cannot see, and
+    it is the single biggest thing this model used to leave on the table.
+  * BACKS AGE EARLY, AND THE WINDOW IS A CLIFF, NOT A SLOPE. Every RB who ever
+    became a league-winner from inside the first six rounds was either in one
+    of his first four seasons OR had already been a league-winner before. So
+    Window scores that rule as an OR: year five is a cliff for everyone who
+    hasn't already cleared the bar. 85% of league-winning RB seasons came from
+    backs 27 or younger, average age 25.1.
   * SHORTER MEMORY. RECENCY is 4 seasons, not the QB model's 5, and a healthy
     season is 10 games instead of 12. Backfields turn over fast and backs miss
     more time; a 2021 workload should not be shaping a 2026 projection.
@@ -34,16 +42,17 @@ has his team-based factors -- AND his backfield share -- pulled toward neutral,
 because last year's share on last year's depth chart says very little about the
 job he's walking into.
 
-There is deliberately no archetype bucket, no league-winner screen and no
-hand-maintained backfield file in here. Those are the next tier; this file is
-only the free, measurable stuff.
+There is deliberately no archetype bucket and no hand-maintained backfield file
+in here. The receiving-share archetypes were tested against this board and did
+NOT explain where it disagrees with the market, so they aren't in the blend on
+the strength of a story alone. Everything here is still free and measurable.
 """
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
-from . import calibration, rankings, scoring
+from . import availability, calibration, config, rankings, scoring
 
 # --- Model constants --------------------------------------------------------
 K_TD = 10.0         # TD regression: games needed to fully trust observed TDs
@@ -66,6 +75,81 @@ MIN_CAL_ROWS = calibration.MIN_ROWS   # kept as an alias; the real one lives the
 # PPR this constant needs to move to about 2.5.
 TARGET_MULT = 1.8
 
+# What share of his own team's backfield work a back actually went on to take,
+# by the slot he entered the season in. Measured over 653 back-seasons from
+# 2018-2025, not assumed:
+#
+#   slot 1  38.9%   slot 2  22.2%   slot 3  11.5%   slot 4  7.8%   slot 5  5.9%
+#
+# The gap between slot 1 and slot 2 is the whole reason this factor exists.
+SLOT_SHARE = {1: 0.389, 2: 0.222, 3: 0.115, 4: 0.078, 5: 0.059}
+
+# How far a team's backfield workload is pulled back toward the league median.
+# Last year's team total is evidence about this year, not a promise.
+BF_TO_MEDIAN = 0.25
+
+# Volume = last season's touches per game blended with the touches his slot
+# implies. This is the "combo of opportunity and prior output" -- without it,
+# Volume is pure box score, so a back who was third on the chart last year
+# carries a third-stringer's Volume into a season he starts.
+VOL_ROLE_W = 0.25
+
+# Heath's window, scored 0-100. Not an age curve -- a cliff at year five with an
+# explicit exemption, because the rule it encodes is an OR: first four seasons,
+# OR already a league-winner. A 30-year-old who has done it stays draftable; a
+# 27-year-old who never has does not.
+WINDOW_SCORES = {1: 90.0, 2: 100.0, 3: 95.0, 4: 85.0, 5: 55.0}
+WINDOW_LATE = 30.0      # year six and beyond, never a league-winner
+WINDOW_PROVEN = 65.0    # ...unless he already was one
+ELITE_RANK = 12         # "has done it before" = a top-12 RB scoring season
+ELITE_MIN_GAMES = 8     # ...over a real sample, not four hot weeks
+
+# --- Will he be on the field in September? ----------------------------------
+# Everything above this line describes a back's JOB. None of it knows whether
+# he's healthy enough to hold it in week one, and that is a real hole: the board
+# had Zach Charbonnet at RB16 in August 2026 while the market had him RB42,
+# entirely because the model could see he was Seattle's listed starter and could
+# not see the knee.
+#
+# This used to hedge: an expected 11 games got priced as about 13, on the theory
+# that a return date is only an estimate. That reasoning was wrong and it is
+# worth writing down why, because it is an easy mistake to make twice.
+#
+# A back projected for 11 games is not being asked to beat a soft August return
+# date. The season starts in September and ends in January, so 11 games means
+# roughly six REAL games -- weeks that count -- are already spoken for. Hedging
+# up to 13 was quietly assuming the good half of that. It is also the wrong shape
+# of bet: the upside is capped at 17 while the downside runs all the way to a
+# setback and injured reserve, so "split the difference" is not neutral, it is
+# optimistic. And the guide's own front page says these are 17-game projections
+# with injuries NOT priced in -- so when it singles a back out for 11, that 11 is
+# a specific, deliberate carve-out and not a rounding error.
+#
+#   games_ratio = 1 - NEWS_W * (1 - expected_games / 17)
+#
+# NEWS_W is 1.0: the number goes in at face value. Charbonnet at 11 games is
+# priced as 11 games. Put down what you actually believe, because the model no
+# longer argues with you. The dial stays here because it is the honest place to
+# turn a source down if one ever deserves it -- not because 11 needs softening.
+# A back nobody has reported anything about is 1.0 and is not touched at all.
+NEWS_W = 1.0
+MIN_GAMES_RATIO = 0.35      # nobody's season gets written off entirely in August
+
+# A guide's games column answers two different questions with one number: "hurt,
+# will miss time" and "third on the depth chart, will get mop-up work". Only the
+# first is news. The second is a job description, and the job is already priced
+# through Role and Backfield share -- taking it a second time here would charge a
+# backup twice for being a backup. So a guide number below this is read as a
+# depth-chart statement and ignored. Anything YOU type by hand is always taken.
+GUIDE_GAMES_FLOOR = availability.GUIDE_FLOOR
+
+# How much of a rookie's projection comes from an outside projection rather than
+# from the size of his job. He has no NFL box score at all, so the usual
+# sample-size shrink (career_games / (career_games + K_CAREER)) would be exactly
+# zero and would rate him purely on his depth-chart slot. Half and half instead:
+# the job AND somebody's number for him.
+ROOKIE_TRUST = 0.5
+
 # Raw signals surfaced in each back's detail panel, with friendly labels.
 SIGNALS = {
     "talent_reg": "Talent · last healthy yrs (reg fp/gm)",
@@ -74,10 +158,16 @@ SIGNALS = {
     "rec_val": "Receiving value (reg fp/gm)",
     "carries_pg": "Carries/gm",
     "targets_pg": "Targets/gm",
-    "opp_pg": "Weighted touches/gm",
+    "opp_pg": "Weighted touches/gm (last yr)",
+    "opp_blend": "Weighted touches/gm · blended w/ role",
     "bf_share": "Backfield share (of team RB work)",
     "bf_carry_share": "Share of team RB carries",
     "bf_target_share": "Share of team RB targets",
+    "depth_rank": "Depth-chart slot entering the year",
+    "team_bf": "Team backfield touches/gm (last yr)",
+    "depth_share": "Share of the backfield his slot gets",
+    "role_opp": "Expected touches/gm from his slot",
+    "yr_in_league": "NFL season number",
     "snap_pct": "Snap share",
     "ypc": "Yards per carry",
     "ypt": "Yards per target",
@@ -89,18 +179,35 @@ SIGNALS = {
     "implied_total_avg": "Team implied total",
     "points_pg": "Team points/gm",
     "win_total": "Vegas win total",
+    "clay_rank": "Outside guide's RB rank",
+    "clay_games": "Games the outside guide expects",
+    "proj_games": "Games this board expects",
 }
 
 # Factor -> weight (percent). These sum to 100 and are retunable live in the
-# report. Talent is what the calibration hangs on; Volume and Backfield are the
-# two that actually forecast, which is why together they outweigh it.
+# report.
+#
+# These moved a long way in August 2026, and the reason is worth writing down.
+# The old set put 76 of its 100 points on percentiles of last season's box
+# score, which made the board lean systematically OLD -- it kept paying proven
+# veterans for work they had already done and had no way to pay a back for the
+# job he is walking into. Against consensus RB ADP the rank correlation was
+# 0.836 and the average disagreement 5.6 spots, and the size of the disagreement
+# tracked age at +0.40.
+#
+# Taking 12 points out of Talent and 10 out of Volume to fund Window and Role
+# fixes that: 0.881, 4.7 spots, and the age tilt collapses to +0.05. The
+# backtest error improves too (2.75 from 2.81), so this is not a case of
+# chasing the market at the cost of accuracy.
 DEFAULT_WEIGHTS = {
-    "Talent": 26,       # TD-regressed total fp/gm over his last healthy seasons
-    "Volume": 18,       # weighted touches per game (a target counts as 1.8)
+    "Talent": 14,       # TD-regressed total fp/gm over his last healthy seasons
     "Receiving": 14,    # targets + receiving production (the half-PPR premium)
-    "Backfield": 12,    # his share of his own team's RB work
+    "Window": 12,       # first four seasons, OR already a league-winner
+    "Backfield": 12,    # his share of his own team's RB work (half from the chart)
+    "Role": 10,         # depth-chart slot x how much work that backfield gets
     "Vegas": 10,        # preseason win total + implied team total
     "Availability": 10, # age curve x durability
+    "Volume": 8,        # weighted touches per game (a target counts as 1.8)
     "Efficiency": 6,    # yards per carry & yards per target
     "Situation": 4,     # team pace & run lean
     "Matchup": 0,
@@ -115,9 +222,11 @@ from .qb_blend import (  # noqa: E402
 
 __all__ = [
     "DEFAULT_WEIGHTS", "GROUPS", "SIGNALS", "TARGET_MULT",
-    "season_aggregates", "entering_profiles", "add_indices", "composite",
+    "SLOT_SHARE", "WINDOW_SCORES",
+    "season_aggregates", "entering_profiles", "attach_role_window",
+    "add_indices", "composite",
     "calibrate", "backtest", "run", "run_upcoming", "build_upcoming",
-    "win_totals", "playcallers",
+    "win_totals", "playcallers", "depth_history",
 ]
 
 
@@ -136,6 +245,123 @@ def _age_curve(age: float) -> float:
     if age < 22:
         return 0.95     # young is fine; unproven is handled by sample-size regression
     return max(0.35, 1.0 - (age - 25) * 0.09)
+
+
+# ---------------------------------------------------------------------------
+# 0b. Two outside files: a published projection set, and your own injury notes
+#
+# Neither of these is allowed to become the model. A well-known analyst's RB
+# ranks correlate 0.99 with consensus ADP, so blending his numbers into every
+# projection would just turn this board into the market with extra steps and
+# throw away the whole reason for having a board. They do two narrow jobs he is
+# genuinely better placed to do than a box score is:
+#
+#   1. HOW MANY GAMES he expects a back to play. That is the only forward-looking
+#      health information anywhere in this model.
+#   2. A STARTING NUMBER FOR A ROOKIE, who has no NFL box score to regress.
+#
+# Both files are optional. A missing file is not an error -- the model just has
+# no outside opinion, every back gets a full slate, and rookies stay off the
+# board exactly as they did before.
+# ---------------------------------------------------------------------------
+_CLAY: dict = {}
+_CLAY_LOADED = False
+
+
+def clay_projections() -> dict:
+    """{player_id: row} from data/clay_rb_<upcoming season>.csv.
+
+    Written by scripts/import_clay.py, which reads the published PDF once a year.
+    The build itself never opens a PDF.
+    """
+    global _CLAY_LOADED
+    if _CLAY_LOADED:
+        return _CLAY
+    _CLAY_LOADED = True
+    try:
+        path = config.DATA_DIR / f"clay_rb_{config.UPCOMING_SEASON}.csv"
+        if not path.exists():
+            return _CLAY
+        df = pd.read_csv(path)
+        if not {"player_id", "clay_rank", "clay_games"}.issubset(df.columns):
+            return _CLAY
+        # His share of his own backfield in those projections, weighted the same
+        # way touches are weighted everywhere else here.
+        car = pd.to_numeric(df.get("carries"), errors="coerce").fillna(0.0)
+        tgt = pd.to_numeric(df.get("targets"), errors="coerce").fillna(0.0)
+        df["clay_opp"] = car + TARGET_MULT * tgt
+        tot = df.groupby("team")["clay_opp"].transform("sum")
+        df["clay_bf_share"] = df["clay_opp"] / tot.where(tot > 0)
+        for row in df.to_dict("records"):
+            _CLAY[str(row["player_id"])] = row
+    except Exception:      # noqa: BLE001 -- an outside file must never fail a build
+        pass
+    return _CLAY
+
+
+def expected_games() -> dict:
+    """{normalized name: (games, note)} from data/rb_availability.csv.
+
+    Hand-maintained, and deliberately tiny: it is where YOU put a report the
+    published guide hasn't caught up with. When both have a number, yours wins --
+    that's the point of it existing. The reading lives in src/availability.py so
+    the QB board and this one can never drift apart on what the file means.
+    """
+    return availability.hand_notes("RB")
+
+
+def _clay_bundle(c: dict | None, ppr: float = 0.5) -> dict | None:
+    """A stand-in profile for a back with no NFL box score, from the guide.
+
+    This is the second half of "rank a rookie on his job plus somebody's number".
+    The first half -- the size of the job -- every back already gets from the
+    depth chart through Role. What a rookie is missing is the prior-output half,
+    and this fills it with a published projection instead of leaving the shrink
+    to invent one out of the league average.
+
+    Touchdowns are NOT regressed here the way a real season's are. Projected
+    scores are already somebody's smoothed expectation; regressing them again
+    would be pulling the same number toward the mean twice.
+    """
+    if not c:
+        return None
+    g = float(c.get("clay_games") or 0)
+    if g <= 0:
+        return None
+
+    def f(k):
+        v = c.get(k)
+        return 0.0 if v is None or pd.isna(v) else float(v)
+
+    car, tgt, rec = f("carries"), f("targets"), f("rec")
+    rush_pg = (f("rush_yds") * 0.1 + f("rush_td") * 6.0) / g
+    rec_pg = (f("rec_yds") * 0.1 + rec * ppr + f("rec_td") * 6.0) / g
+
+    def sh(k):
+        v = c.get(k)
+        return np.nan if v is None or pd.isna(v) else float(v)
+
+    return {
+        "talent_reg": rush_pg + rec_pg,
+        "rush_val": rush_pg,
+        "rec_val": rec_pg,
+        "carries_pg": car / g,
+        "targets_pg": tgt / g,
+        "opp_pg": (car + TARGET_MULT * tgt) / g,
+        "bf_share": sh("clay_bf_share"),
+        "bf_carry_share": sh("clay_carry_share"),
+        "bf_target_share": sh("clay_target_share"),
+        "snap_pct": np.nan,
+        "ypc": (f("rush_yds") / car) if car else np.nan,
+        "ypt": (f("rec_yds") / tgt) if tgt else np.nan,
+        "career_games": 0.0,
+        "healthy_recent": False,
+        "prev_ppg": np.nan,
+        "prev_games": np.nan,
+        "prev_team": None,
+        "prior_source": "clay",
+        "trust_override": ROOKIE_TRUST,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -386,11 +612,26 @@ def _bundle(pdf: pd.DataFrame, as_of: int) -> dict | None:
             out[col.replace("_fp_reg_pg", "_val")] = np.nan
 
     prior_sorted = prior.sort_values("season")
+    last = prior_sorted.iloc[-1]
     out.update({
         "career_games": float(prior["games"].sum()),
         "healthy_recent": bool(len(healthy) > 0),
         "prev_ppg": float(prior_sorted["total_fp_pg"].iloc[-1]),
-        "prev_games": float(prior_sorted["games"].iloc[-1]),
+        "prev_games": float(last["games"]),
+        # Games a season over his last three, not just last year's. One season is
+        # a tiny sample to judge a body on, and reading only the most recent one
+        # writes off a durable back who happened to break a bone. Tested on
+        # seasons the fit never saw, three years beats one at both positions.
+        # Only availability.py uses it -- the Availability index still reads last
+        # season on purpose, so fresh news moves a rank faster than a mean does.
+        "prev_games3": float(prior_sorted["games"].tail(3).mean()),
+        # How big last season's job was, on a 0-to-1 scale where 1 is a genuine
+        # workhorse's 18 carries a game. Only used to work out how many games he
+        # plays NEXT year -- a back who missed time while carrying a real load is
+        # a different bet from a backup who was simply never active, and the
+        # games model can't tell them apart without this. See availability.py.
+        "prev_role": float(np.clip(
+            (float(last["carries"]) / max(float(last["games"]), 1.0)) / 18.0, 0.0, 1.0)),
         "prev_team": prior_sorted["team"].iloc[-1],
     })
     return out
@@ -446,8 +687,233 @@ def entering_profiles(sa: pd.DataFrame, team_season: pd.DataFrame,
 
 
 # ---------------------------------------------------------------------------
+# 3b. Role and Window inputs
+#
+# These two factors need things the profile rows don't already carry: the depth
+# chart a back entered each season on, how much work his whole backfield gets,
+# how many years he's been in the league, and whether he has ever finished a
+# season as a top-12 back. All four are cheap and free; none of them were being
+# used. This section attaches the RAW numbers, and add_indices() turns them into
+# indices like everything else.
+# ---------------------------------------------------------------------------
+_DEPTH_HIST: dict = {}
+_DEPTH_SHARE: dict = {}
+_DEPTH_LOADED = False
+
+
+def _load_depth() -> None:
+    """Read the depth history once and build both maps off it."""
+    global _DEPTH_LOADED
+    if _DEPTH_LOADED:
+        return
+    _DEPTH_LOADED = True
+    try:
+        from . import data as _data          # local import: keeps src/ import-light
+        dc = _data.get_depth_history()
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [warn] Depth-chart history unavailable ({exc}).")
+        return
+    if dc is None or dc.empty:
+        return
+    d = dc.copy()
+    d["slot"] = pd.to_numeric(d["depth"], errors="coerce").clip(upper=5)
+    d = d.dropna(subset=["slot"])
+    if d.empty:
+        return
+    d["slot"] = d["slot"].astype(int)
+    # Two backs listed as co-starters split a starter's share of the backfield
+    # rather than both being handed a full starter's workload.
+    tied = d.groupby(["season", "team", "slot"])["slot"].transform("size")
+    d["share"] = d["slot"].map(SLOT_SHARE) / tied
+    for row in d.itertuples():
+        try:
+            key = (str(row.gsis_id), int(row.season))
+        except (TypeError, ValueError):
+            continue
+        _DEPTH_HIST[key] = int(row.slot)
+        if pd.notna(row.share):
+            _DEPTH_SHARE[key] = float(row.share)
+
+
+def depth_history() -> dict:
+    """(player_id, season) -> depth-chart slot entering that season, capped at 5.
+
+    Loaded once per run and cached in memory. If the pull fails we return an
+    empty map and the model carries on with no Role information rather than
+    stopping -- see add_indices(), where Role falls back to Volume.
+    """
+    _load_depth()
+    return _DEPTH_HIST
+
+
+def depth_shares() -> dict:
+    """(player_id, season) -> his share of the backfield's work, per the chart."""
+    _load_depth()
+    return _DEPTH_SHARE
+
+
+def _rookie_years(players: pd.DataFrame | None) -> dict:
+    """player_id -> the season he entered the league."""
+    if players is None or players.empty:
+        return {}
+    cols = {str(c).lower(): c for c in players.columns}
+    id_col = cols.get("gsis_id") or cols.get("player_id")
+    yr_col = cols.get("rookie_season") or cols.get("rookie_year") or cols.get("entry_year")
+    if not id_col or not yr_col:
+        return {}
+    out = {}
+    for pid, yr in zip(players[id_col], players[yr_col]):
+        if pd.notna(pid) and pd.notna(yr):
+            try:
+                out[str(pid)] = int(yr)
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _elite_seasons(sa: pd.DataFrame) -> dict:
+    """player_id -> the seasons he finished a top-12 RB. Heath's 'done it before'.
+
+    Top 12 by points per game among backs with at least 8 games, which is the
+    closest free stand-in for "league-winner" -- an RB1 season on a real sample.
+    """
+    if sa is None or sa.empty:
+        return {}
+    games = pd.to_numeric(sa.get("games"), errors="coerce")
+    e = sa[games.fillna(0) >= ELITE_MIN_GAMES].copy()
+    if e.empty:
+        return {}
+    e["_rk"] = e.groupby("season")["total_fp_pg"].rank(ascending=False, method="min")
+    out: dict = {}
+    for row in e[e["_rk"] <= ELITE_RANK].itertuples():
+        out.setdefault(str(row.player_id), []).append(int(row.season))
+    return out
+
+
+def attach_role_window(prof: pd.DataFrame, sa: pd.DataFrame,
+                       players: pd.DataFrame | None) -> pd.DataFrame:
+    """Attach the raw inputs behind Role and Window. No percentiles here."""
+    if prof is None or prof.empty:
+        return prof
+    p = prof.copy()
+    hist = depth_history()
+
+    # 1. Depth slot. History covers completed seasons; the upcoming season's
+    #    slot already came through build_upcoming() off the live depth chart.
+    given = (pd.to_numeric(p["depth_rank"], errors="coerce")
+             if "depth_rank" in p.columns else pd.Series(np.nan, index=p.index))
+    slots = []
+    for pid, season, live in zip(p["player_id"], p["season"], given):
+        slot = hist.get((str(pid), int(season)))
+        if slot is None and pd.notna(live):
+            slot = int(live)
+        slots.append(np.nan if slot is None else float(min(int(slot), 5)))
+    p["depth_rank"] = pd.Series(slots, index=p.index, dtype=float)
+
+    # 2. How much work the whole backfield gets, from last season's team total.
+    #    Offenses change more slowly than depth charts do, so carrying the prior
+    #    year forward is fair; a team we've never seen gets the league median.
+    #
+    #    Team carries and targets divided by team GAMES. The old version summed
+    #    each back's per-GAME rate, which counts a 17-game starter and a two-game
+    #    callup the same and had Arizona's backfield at 66 touches a game when a
+    #    whole NFL offense runs about 65 plays. Jacksonville read last in the
+    #    league on that arithmetic and is actually mid-pack.
+    g = sa.groupby(["team", "season"]).agg(_car=("carries", "sum"),
+                                           _tgt=("targets", "sum")).reset_index()
+    g["_gm"] = np.where(g["season"] <= 2020, 16.0, 17.0)
+    g["team_bf"] = (g["_car"] + TARGET_MULT * g["_tgt"]) / g["_gm"]
+    g["season"] = g["season"] + 1
+    bf_map = {(str(r.team), int(r.season)): float(r.team_bf) for r in g.itertuples()}
+    median_bf = float(g["team_bf"].median()) if not g.empty else np.nan
+    raw_bf = pd.Series([bf_map.get((str(t), int(s)), median_bf)
+                        for t, s in zip(p["team"], p["season"])],
+                       index=p.index, dtype=float)
+    p["team_bf"] = (1 - BF_TO_MEDIAN) * raw_bf + BF_TO_MEDIAN * median_bf
+
+    # 3. The product, and the point of the whole exercise: the touches his SLOT
+    #    normally gets on THIS offense. A back with no NFL history at all still
+    #    gets a real number here, which is exactly where the old model was blind.
+    #    Co-starters split the slot; rows with no chart in the history (every
+    #    upcoming-season row) fall back to the league-average share for the slot.
+    shares = depth_shares()
+    sh = pd.Series([shares.get((str(i), int(s)))
+                    for i, s in zip(p["player_id"], p["season"])],
+                   index=p.index, dtype=float)
+    p["depth_share"] = sh.fillna(p["depth_rank"].map(SLOT_SHARE))
+    p["role_opp"] = p["team_bf"] * p["depth_share"]
+
+    # 4. Where he is in his career, and whether he's already cleared the bar.
+    rookie = _rookie_years(players)
+    first_seen = {str(k): v for k, v in sa.groupby("player_id")["season"].min().items()}
+    elite = _elite_seasons(sa)
+    years, proven = [], []
+    for pid, season in zip(p["player_id"], p["season"]):
+        start = rookie.get(str(pid), first_seen.get(str(pid)))
+        years.append(np.nan if start is None or pd.isna(start)
+                     else int(season) - int(start) + 1)
+        proven.append(any(y < int(season) for y in elite.get(str(pid), ())))
+    p["yr_in_league"] = pd.Series(years, index=p.index, dtype=float)
+    p["proven"] = pd.Series(proven, index=p.index, dtype=bool)
+
+    # 5. Will he be on the field? See NEWS_W above for why this is a dial and
+    #    not a switch.
+    return _attach_availability(p)
+
+
+def _attach_availability(p: pd.DataFrame) -> pd.DataFrame:
+    """Attach clay_rank / clay_games / games_ratio / proj_games / games_note.
+
+    All of the actual work lives in src/availability.py, on purpose: the
+    quarterback board calls the identical function, so the two boards can never
+    quietly drift apart on what a games number means. Only the upcoming season
+    gets touched, so nothing an outside guide says about 2026 can leak backwards
+    into the backtest -- it still scores this model on the same information it
+    always had.
+    """
+    return availability.attach(p, "RB", NEWS_W, MIN_GAMES_RATIO)
+
+
+# ---------------------------------------------------------------------------
 # 4. Indices + composite
 # ---------------------------------------------------------------------------
+def _role_prior(prof: pd.DataFrame, col: str) -> pd.Series:
+    """What a back in this job typically posts -- a straight line fitted across
+    the whole pool each season, read at his own expected opportunity.
+
+    It uses none of the player's own results, only the size of the job he holds,
+    so it is a fair thing for a thin sample to lean on.
+    """
+    y = pd.to_numeric(prof.get(col), errors="coerce")
+    x = pd.to_numeric(prof.get("role_opp"), errors="coerce")
+    out = pd.Series(np.nan, index=prof.index, dtype=float)
+    if y is None or x is None or x.notna().sum() == 0:
+        return out
+    for _, idx in prof.groupby("season").groups.items():
+        ys, xs = y.loc[idx], x.loc[idx]
+        ok = ys.notna() & xs.notna()
+        if ok.sum() >= 20:
+            b, a = np.polyfit(xs[ok].to_numpy(), ys[ok].to_numpy(), 1)
+            out.loc[idx] = a + b * xs
+        out.loc[idx] = out.loc[idx].fillna(ys.mean())
+    return out
+
+
+def _shrink_target(prof: pd.DataFrame, col: str) -> pd.Series:
+    """Where a thin sample regresses to: an average back IN HIS ROLE.
+
+    The old target was the average of every back in the league, which is how a
+    starter with six career games ended up rated like a committee back -- and it
+    is the single biggest reason the board disagreed with the market on young
+    starters. Floored at the pool mean on purpose: the prior may say "his job is
+    bigger than his resume", never "ignore the touches he actually got".
+    """
+    y = pd.to_numeric(prof.get(col), errors="coerce")
+    pool = y.groupby(prof["season"]).transform("mean")
+    rp = _role_prior(prof, col).fillna(pool)
+    return pd.Series(np.maximum(rp, pool), index=prof.index).fillna(pool)
+
+
 def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame:
     weights = weights or DEFAULT_WEIGHTS
     p = prof.copy()
@@ -456,11 +922,17 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     # how thin the career is. Backs produce sooner than quarterbacks do, so the
     # shrink is gentler here (K_CAREER 10 vs 12) -- but a six-game hot streak
     # still can't crown anyone.
-    pool_mean = p.groupby("season")["talent_reg"].transform("mean")
     cg = pd.to_numeric(p["career_games"], errors="coerce").fillna(0.0)
     wc = cg / (cg + K_CAREER)
-    p["talent_final"] = wc * p["talent_reg"] + (1 - wc) * pool_mean
-    p["reg_shrink"] = (1 - wc)          # 0 = fully trusted, 1 = fully to the mean
+    # A rookie has zero career games, so the line above would trust his number
+    # not at all and rate him purely on the size of his job. Rows carrying an
+    # outside projection instead of an NFL box score get a fixed half-trust --
+    # the job AND the number, which is the whole reason they're on the board.
+    if "trust_override" in p.columns:
+        _ov = pd.to_numeric(p["trust_override"], errors="coerce")
+        wc = wc.where(_ov.isna(), _ov)
+    p["talent_final"] = wc * p["talent_reg"] + (1 - wc) * _shrink_target(p, "talent_reg")
+    p["reg_shrink"] = (1 - wc)          # 0 = fully trusted, 1 = fully to the role
 
     def pct(col):
         if col not in p.columns:
@@ -469,15 +941,27 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
 
     p["Talent"] = pct("talent_final")
 
-    # Volume: weighted touches per game. One number, and the most repeatable
-    # thing a running back has.
-    p["Volume"] = pct("opp_pg")
+    # Volume: weighted touches per game -- last season's, blended a quarter of
+    # the way toward what his current slot implies. Prior output on its own is
+    # the most repeatable thing a back has, but it describes the job he HAD.
+    _opp = pd.to_numeric(p.get("opp_pg"), errors="coerce")
+    _ro = (pd.to_numeric(p.get("role_opp"), errors="coerce")
+           if "role_opp" in p.columns else pd.Series(np.nan, index=p.index))
+    p["opp_blend"] = np.where(_ro.notna() & _opp.notna(),
+                              (1 - VOL_ROLE_W) * _opp + VOL_ROLE_W * _ro, _opp)
+    p["Volume"] = pct("opp_blend")
 
     # Receiving: half target VOLUME, half receiving PRODUCTION -- the same split
     # the QB model uses for rushing, and for the same reason. Targets are a
-    # coaching decision and repeat; receiving yards and scores wobble.
-    _rec_prod = pct("rec_val")
-    _rec_vol = pct("targets_pg")
+    # coaching decision and repeat; receiving yards and scores wobble. Both are
+    # shrunk toward the role the same way talent is, so a pass-catching job on a
+    # thin resume isn't scored as if the player had no receiving future.
+    p["rec_val_final"] = (wc * pd.to_numeric(p.get("rec_val"), errors="coerce")
+                          + (1 - wc) * _shrink_target(p, "rec_val"))
+    p["targets_final"] = (wc * pd.to_numeric(p.get("targets_pg"), errors="coerce")
+                          + (1 - wc) * _shrink_target(p, "targets_pg"))
+    _rec_prod = pct("rec_val_final")
+    _rec_vol = pct("targets_final")
     if _rec_vol.notna().any():
         p["Receiving"] = (1 - REC_VOL_W) * _rec_prod + REC_VOL_W * _rec_vol.fillna(_rec_prod)
     else:
@@ -501,9 +985,17 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     if "pass_rate" in p.columns:
         p["neg_pass"] = -pd.to_numeric(p["pass_rate"], errors="coerce")
     p["Situation"] = pd.concat([pct("plays_pg"), pct("neg_pass")], axis=1).mean(axis=1)
+    # Availability was age x durability, and both of those look backwards. The
+    # games ratio is the forward-looking third term. It is in here as WELL as in
+    # the games count on purpose: a back coming off a knee is usually worth a
+    # little less in the games he does play -- he ramps up, he splits the work
+    # while he proves it -- so the news should cost him twice, gently, rather
+    # than once, hard. At 10% of the blend this is the gentle half.
+    _gr = (pd.to_numeric(p["games_ratio"], errors="coerce").fillna(1.0)
+           if "games_ratio" in p.columns else pd.Series(1.0, index=p.index))
     p["Availability"] = [
-        _age_curve(a) * (d if pd.notna(d) else 0.8) * 100
-        for a, d in zip(p["age"], p["durability"])
+        _age_curve(a) * (d if pd.notna(d) else 0.8) * 100 * r
+        for a, d, r in zip(p["age"], p["durability"], _gr)
     ]
     p["Matchup"] = 50.0
 
@@ -515,6 +1007,42 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     for col in ["Situation", "Vegas", "Backfield"]:
         m = p["mover"] == True  # noqa: E712
         p.loc[m, col] = 0.6 * p.loc[m, col] + 0.4 * 50
+
+    # ---- Role: the job he has, not the box score of whoever had it last -----
+    # Depth-chart slot x how much work that backfield gets. Note it is NOT in
+    # the mover-shrink list above, and that's deliberate: for a back who just
+    # changed teams this is the ONLY factor that describes his actual new job.
+    # It is worth its own weight -- adding it lifts the R-squared on next-season
+    # points from .52 to .56 on top of prior-year opportunity, and it holds for
+    # thin-sample backs and 45-game veterans alike.
+    _role = pct("role_opp")
+    p["Role"] = _role.fillna(p["Volume"])          # no chart -> say nothing new
+
+    # ---- Window: Heath's rule, as an OR ------------------------------------
+    # First four seasons, OR already a league-winner. A plain age slope was
+    # tried first and it broke Derrick Henry -- it kept marking down backs who
+    # have very obviously proven they can still do it. The exemption is the
+    # whole point of the rule, so it's in the code.
+    if "yr_in_league" in p.columns:
+        _yr = pd.to_numeric(p["yr_in_league"], errors="coerce")
+        _clamped = _yr.clip(lower=1)
+        _win = _clamped.map(WINDOW_SCORES).fillna(WINDOW_LATE)
+        if "proven" in p.columns:
+            _done = p["proven"].fillna(False).astype(bool) & (_clamped >= 5)
+            _win = _win.where(~_done, WINDOW_PROVEN)
+        p["Window"] = _win.where(_yr.notna(), 50.0)
+
+    # ---- Backfield gets half its answer from the chart too ------------------
+    # Same argument as Role, applied to share instead of volume. For a back who
+    # changed teams last year's share is close to meaningless; the slot he's
+    # entering camp in is not.
+    if "depth_rank" in p.columns:
+        _slot = p["depth_rank"].map(SLOT_SHARE)
+        if _slot.notna().any():
+            _slot_pct = _slot.groupby(p["season"]).rank(pct=True) * 100
+            p["Backfield"] = np.where(_slot.notna(),
+                                      0.5 * p["Backfield"] + 0.5 * _slot_pct,
+                                      p["Backfield"])
 
     for gcol in GROUPS:
         p[gcol] = pd.to_numeric(p.get(gcol), errors="coerce").fillna(50.0)
@@ -580,7 +1108,7 @@ def backtest(p: pd.DataFrame) -> dict:
 # ---------------------------------------------------------------------------
 def _empty(weights: dict, extra: dict | None = None) -> dict:
     out = {"payload": [], "calib": {"a": 0.0, "b": 0.25}, "backtest": {},
-           "weights": weights, "groups": [g for g in GROUPS if weights[g] > 0]}
+           "weights": weights, "groups": [g for g in GROUPS if weights.get(g, 0) > 0]}
     if extra:
         out.update(extra)
     return out
@@ -603,8 +1131,18 @@ def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
     knots = ((extra or {}).get("calibration") or {}).get("knots") or []
     cur["proj_ppg"] = calibration.apply(cur["composite"], a, b, knots)
     cur["position"] = "RB"
+    # Rank on SEASON value, not on rate. A draft board is a season-value list --
+    # that is what ADP is pricing -- and until this line existed a back expected
+    # to miss a month sat exactly where a back playing all seventeen sat. Every
+    # healthy back is 17 games, so this reorders nobody except the ones there is
+    # actual news about.
+    if "proj_games" not in cur.columns:
+        cur["proj_games"] = 17.0
+    cur["proj_games"] = (pd.to_numeric(cur["proj_games"], errors="coerce")
+                         .fillna(17.0).clip(lower=1.0, upper=17.0))
     board = rankings.build_rankings(
-        cur[["player_id", "player_name", "position", "proj_ppg"]], ppg_col="proj_ppg"
+        cur[["player_id", "player_name", "position", "proj_ppg", "proj_games"]],
+        ppg_col="proj_ppg",
     )
     by_id = {r["player_id"]: r for r in cur.to_dict("records")}
     payload = []
@@ -642,6 +1180,12 @@ def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
             # perfectly healthy 30-year-old scores low on it, and a flag that
             # said "injury history" off that number would be inventing one.
             "durability": _r(row, "durability", 2),
+            # How many of the 17 we expect him to play, why, and what an outside
+            # guide thinks of him. `games` is the one the page ranks on.
+            "games": round(float(row.get("proj_games", 17.0)), 1),
+            "games_note": (str(row.get("games_note") or "") or None),
+            "clay_rank": (int(row["clay_rank"]) if pd.notna(row.get("clay_rank")) else None),
+            "rookie": bool(str(row.get("prior_source") or "") == "clay"),
             "indices": {g: round(float(row.get(g, 50.0)), 1) for g in GROUPS},
             "signals": {label: round(float(row[col]), 3 if "share" in col else 2)
                         for col, label in SIGNALS.items()
@@ -652,7 +1196,7 @@ def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
     out = {"payload": payload,
            "calib": {"a": round(a, 3), "b": round(b, 4), "knots": knots},
            "backtest": bt,
-           "weights": weights, "groups": [g for g in GROUPS if weights[g] > 0]}
+           "weights": weights, "groups": [g for g in GROUPS if weights.get(g, 0) > 0]}
     if extra:
         out.update(extra)
     return out
@@ -670,6 +1214,7 @@ def run(weekly, team_season, players, scoring_rules, season, weights=None,
     prof = entering_profiles(sa, team_season, players, _recent_pool(sa))
     if prof.empty:
         return _empty(weights)
+    prof = attach_role_window(prof, sa, players)
     prof = add_indices(prof, weights)
     cal: dict = {}
     a, b = calibrate(prof, info=cal)
@@ -694,11 +1239,20 @@ def build_upcoming(sa, team_season, players, current_map, season,
     birth = _birth_map(players)
     by_pid = {str(pid): pdf for pid, pdf in sa.groupby("player_id")}
 
+    clay = clay_projections()
+
     rows, skipped = [], []
     for _, cm in current_map.iterrows():
         pid = str(cm["gsis_id"])
         pdf = by_pid.get(pid)
         b = _bundle(pdf, season) if pdf is not None else None
+        if b is None:
+            # No NFL history at all. He used to be dropped here, which is how a
+            # rookie starting for a real team ended up missing from a draft board
+            # the market was already pricing in the third round. If an outside
+            # guide has a number on him he gets a row instead -- ranked roughly
+            # is a great deal better than not ranked.
+            b = _clay_bundle(clay.get(pid))
         if b is None:
             if cm.get("name"):
                 skipped.append(str(cm["name"]))
@@ -706,6 +1260,8 @@ def build_upcoming(sa, team_season, players, current_map, season,
         name = cm.get("name")
         if not name and pdf is not None:
             name = pdf.sort_values("season")["player_name"].iloc[-1]
+        if not name:
+            name = (clay.get(pid) or {}).get("name")
         rows.append({
             "player_id": pid,
             "player_name": name or pid,
@@ -740,6 +1296,7 @@ def run_upcoming(weekly, team_season, players, current_map, scoring_rules, seaso
         return _empty(weights, {"skipped_rookies": skipped})
 
     allp = pd.concat([hist, up], ignore_index=True, sort=False)
+    allp = attach_role_window(allp, sa, players)
     allp = add_indices(allp, weights)
     cal: dict = {}
     a, b = calibrate(allp, info=cal)
@@ -747,8 +1304,14 @@ def run_upcoming(weekly, team_season, players, current_map, scoring_rules, seaso
     # score still means the same thing it meant last run.
     bt = backtest(allp)
 
-    cur = allp[(allp["season"] == season)
-               & (allp["career_games"] >= MIN_CAREER_GAMES)].copy()
+    # MIN_CAREER_GAMES exists to keep four-game cameos off the board. A rookie
+    # has no career games by definition, so the rows built off an outside
+    # projection have to be let through it explicitly or the whole point of
+    # adding them is lost on the last line of the function.
+    keep = pd.to_numeric(allp["career_games"], errors="coerce").fillna(0.0) >= MIN_CAREER_GAMES
+    if "prior_source" in allp.columns:
+        keep = keep | (allp["prior_source"].astype(str) == "clay")
+    cur = allp[(allp["season"] == season) & keep].copy()
     if cur.empty:
         return _empty(weights, {"skipped_rookies": skipped})
     return _assemble(cur, a, b, bt, weights,

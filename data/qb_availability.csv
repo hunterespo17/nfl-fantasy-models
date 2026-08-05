@@ -1,0 +1,24 @@
+# HOW MANY GAMES YOU THINK A QUARTERBACK ACTUALLY PLAYS
+#
+# Same file as data\rb_availability.csv, same rules, for the QB board. Open it in
+# Notepad (not Excel, or Excel will eat the # lines), add a row, save, and run
+# PUBLISH MY BOARD. Anything you put here beats what the outside guide says.
+#
+#   player           exactly how the name reads on the board
+#   expected_games   0 to 17. Leave a QB out entirely if he's fine.
+#   note             shows up on his row on the site. Keep it short.
+#
+# THE NUMBER IS TAKEN AT FACE VALUE. Put 12 and he is priced as 12 games. The
+# season runs September to January, so 12 means five real weeks are gone.
+#
+# ONLY PUT INJURIES HERE. "Probably loses the job in November" is not an injury.
+# A benching is a job question and belongs in the depth chart, not here.
+#
+# Right now this file is empty on purpose -- the guide has every starting
+# quarterback down for a full season, and I'm not going to invent an injury
+# nobody has reported. Add a line the first time one gets hurt:
+#
+#   Joe Burrow,12,thumb -- expected back in October
+#
+# Delete a row when he's healthy again. An empty file is fine.
+player,expected_games,note

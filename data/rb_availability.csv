@@ -1,0 +1,23 @@
+# HOW MANY GAMES YOU THINK A RUNNING BACK ACTUALLY PLAYS
+#
+# This is the one place you can tell the board about an injury. Open it in
+# Notepad (not Excel, or Excel will eat the # lines), add a row, save, and run
+# PUBLISH MY BOARD. Anything you put here beats what the outside guide says.
+#
+#   player           exactly how the name reads on the board
+#   expected_games   0 to 17. Leave a back out entirely if he's fine.
+#   note             shows up on his row on the site. Keep it short.
+#
+# THE NUMBER IS TAKEN AT FACE VALUE. Put 11 and he is priced as 11 games, full
+# stop. It used to hedge him up to about 13, and that was wrong: the season runs
+# September to January, so 11 games means six real weeks are already gone, not a
+# soft August return date to argue with. Softening it also bets the wrong way --
+# the best case is capped at 17 while the bad case runs to injured reserve.
+#
+# ONLY PUT INJURIES HERE. "Third on the depth chart" is not an injury, and the
+# board already knows it from the depth chart. Type a backup in at six games and
+# you charge him twice for the same thing.
+#
+# Delete a row when a back is healthy again. An empty file is fine.
+player,expected_games,note
+Zach Charbonnet,11,knee -- may not be ready for week one

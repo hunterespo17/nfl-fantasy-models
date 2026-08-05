@@ -356,6 +356,21 @@ def _flags(payload: list, pos: str, S: dict) -> None:
             if q.get("mover"):
                 dn.append(["warn", "New team"])
 
+            # Somebody has REPORTED that he'll miss time this year, which is a
+            # different claim from "missed time last year" above and is the one
+            # that moves his rank. It goes to the front of the down list because
+            # it is the single most important thing on the row when it's true.
+            #
+            # The test is the note, not the games count. Every back's expected
+            # games now sits under seventeen, because that is what backs actually
+            # play -- flagging on the number alone would hang a warning chip on
+            # all hundred rows and the chip would stop meaning anything.
+            gm = q.get("games")
+            if q.get("games_note") and gm is not None:
+                dn.insert(0, ["warn", f"Only {round(float(gm))} games"])
+            if q.get("rookie"):
+                dn.insert(0, ["warn", "Rookie -- no NFL games"])
+
             # Three of each guaranteed, then backfill from whichever side has more
             # left to say.
             f = up[:3] + dn[:3]
@@ -393,6 +408,15 @@ def _flags(payload: list, pos: str, S: dict) -> None:
             f.append(["warn", "New team"])
         if age is not None and age >= old_age:
             f.append(["down", f"Age {age}"])
+        # Somebody has REPORTED he'll miss time this year -- a different claim
+        # from any of the career reads above, and the one that actually moves his
+        # rank. It goes to the front so it can't be trimmed off a busy row. The
+        # test is the note rather than the games count, because every passer's
+        # expected games now sits under seventeen and flagging on the number
+        # alone would chip every row on the board.
+        gm = q.get("games")
+        if q.get("games_note") and gm is not None:
+            f.insert(0, ["warn", f"Only {round(float(gm))} games"])
         q["flags"] = f[:6]
 
 
