@@ -69,7 +69,7 @@ SIGNALS = {
     "pass_val": "Passing value (reg fp/gm)",
     "career_games": "Career games",
     "age": "Age",
-    "durability": "Durability (games/17)",
+    "durability": "Durability (3-yr, games/17)",
     "clay_rank": "Outside guide's QB rank",
     "clay_games": "Games the outside guide expects",
     "proj_games": "Games this board expects",
@@ -356,9 +356,14 @@ def _bundle(pdf: pd.DataFrame, as_of: int) -> dict | None:
         # is simply not durable, and it matters more here than anywhere else: a
         # passer who misses six weeks empties the one starting spot on your
         # roster. On seasons the fit never saw it cuts the miss from 3.67 games
-        # to 3.38. Only availability.py reads it; the Availability index still
-        # uses last season, so fresh news still moves a rank faster than a mean.
+        # to 3.38. This is the flat mean, which only availability.py reads. The
+        # Availability index uses `dur3` just below -- same three years, but
+        # weighted toward the recent one.
         "prev_games3": float(prior_sorted["games"].tail(3).mean()),
+        # Three years of availability, weighted toward the recent one. See
+        # availability.DUR_WEIGHTS for why this is not just last season.
+        "dur3": availability.durability(
+            list(prior_sorted["games"].tail(3))[::-1]),
         # How big last season's job was, on a 0-to-1 scale where 1 is a full
         # starter's 32 throws a game. Only used to work out how many games he
         # plays NEXT year: a starter who missed six weeks hurt and a backup who
@@ -413,7 +418,7 @@ def entering_profiles(sa: pd.DataFrame, team_season: pd.DataFrame,
                 # ended early before fitting what a pick is worth per game.
                 "actual_games": float(cur.get("games", np.nan)),
                 "age": season - birth.get(str(pid), np.nan),
-                "durability": b["prev_games"] / 17.0,
+                "durability": b.get("dur3", np.nan),
                 "rush_pct": _pct_of(pool_rush, b["rush_val"]),
                 "pass_pct": _pct_of(pool_pass, b["pass_val"]),
                 "win_total": win_totals().get((season, cur["team"])),
@@ -482,7 +487,8 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     if "sack_rate" in p.columns:
         p["neg_sack"] = -p["sack_rate"]
     p["Cast & OL"] = pd.concat([pct("wrte_rec_yds_pg"), pct("neg_sack")], axis=1).mean(axis=1)
-    # Age curve and last year's durability. Both look backwards on purpose, and
+    # Age curve and his three-year durability, weighted toward last season.
+    # Both look backwards on purpose, and
     # THIS YEAR'S NEWS IS DELIBERATELY NOT IN HERE.
     #
     # It used to be -- the games ratio was multiplied in, so an injury was billed
@@ -694,7 +700,7 @@ def build_upcoming(sa, team_season, players, current_map, season, pool) -> tuple
             "team": cm.get("team"),
             "actual_ppg": np.nan,
             "age": season - birth.get(pid, np.nan),
-            "durability": b["prev_games"] / 17.0,
+            "durability": b.get("dur3", np.nan),
             "rush_pct": _pct_of(pool_rush, b["rush_val"]),
             "pass_pct": _pct_of(pool_pass, b["pass_val"]),
             "win_total": win_totals().get((season, cm.get("team"))),

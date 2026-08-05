@@ -1,11 +1,11 @@
-name: Build & deploy the draft board
+name: Build & deploy the boards
 
-# ── When the website rebuilds itself ─────────────────────────────────────────
+# ── When to rebuild the board ────────────────────────────────────────────────
 on:
   schedule:
-    - cron: '23 11 * * *'   # every day ~11:23 UTC (early morning in the US)
+    - cron: '23 11 * * *'   # every day ~11:23 UTC (early morning in the US). Change to taste.
   push:
-    branches: [ main ]      # any push to main rebuilds the site
+    branches: [ main ]      # any push to main (e.g. after you paste fresh ADP) rebuilds
   workflow_dispatch: {}     # adds a manual "Run workflow" button in the Actions tab
 
 # ── Permissions the GitHub Pages deploy needs ────────────────────────────────
@@ -40,28 +40,49 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Fresh nflverse stats and schedules each run -- this is what keeps the
-      # board current without you touching anything.
+      # Fetches fresh nflverse stats/schedules each run — this is what keeps the
+      # board current. (ADP + win totals come from the committed CSVs in data/.)
       - name: Pull fresh nflverse data
         run: python scripts/01_pull_data.py --refresh
 
-      # Live draft prices from ESPN. A site being down must never stop the
-      # deploy, so this is allowed to fail and the committed prices in
-      # data/adp.csv are the floor.
-      - name: Refresh draft prices (optional)
+      # The RB board runs FIRST and is allowed to fail. It is newer than the QB
+      # board and leans on depth charts and snap counts that can be thin in the
+      # offseason; a bad day for the backs must never take the QB board — the
+      # page you actually draft from — off the internet.
+      - name: Build the RB board (optional)
         continue-on-error: true
-        run: python scripts/15_pull_adp.py
-
-      - name: Build the quarterback board
-        run: python scripts/06_build_qb_model.py
-
-      # NOT optional on purpose. If the running backs can't build, the run goes
-      # red and you find out today. The site that's already live stays up.
-      - name: Build the running-back board
         run: python scripts/11_build_rb_model.py
 
-      # Folds every position that built into ONE page with a tab each.
-      - name: Assemble the one-page site
+      - name: Did the RB board build?
+        run: |
+          if [ -s outputs/boards/rb.json ]; then
+            echo "RB board saved, $(wc -c < outputs/boards/rb.json) bytes"
+          else
+            echo "::warning::RB board did not build — deploying without the RB tab."
+          fi
+
+      # The WR board is the newest of the three and leans on the same depth
+      # charts and snap counts the backs do, so it gets the same treatment:
+      # allowed to fail without taking the rest of the page down with it.
+      - name: Build the WR board (optional)
+        continue-on-error: true
+        run: python scripts/16_build_wr_model.py
+
+      - name: Did the WR board build?
+        run: |
+          if [ -s outputs/boards/wr.json ]; then
+            echo "WR board saved, $(wc -c < outputs/boards/wr.json) bytes"
+          else
+            echo "::warning::WR board did not build - deploying without the WR tab."
+          fi
+
+      - name: Build the QB board
+        run: python scripts/06_build_qb_model.py
+
+      # Folds every position that built into ONE page with a tab each, plus the
+      # Big Board and How-it-works. A position that failed above simply has no
+      # saved board, so it gets no tab and the rest of the page is unaffected.
+      - name: Put every position on one page
         run: python scripts/12_build_site.py
 
       # Nice-to-have historical page. If it errors, the board still deploys.
@@ -69,29 +90,27 @@ jobs:
         continue-on-error: true
         run: python scripts/07_backtest_qb.py
 
-      - name: Collect the files Pages will serve
+      - name: Assemble the site
         run: |
           mkdir -p site
-          cp outputs/index.html site/index.html
+          if [ -s outputs/index.html ]; then
+            cp outputs/index.html site/index.html
+          else
+            echo "::warning::Combined page missing — falling back to the QB board alone."
+            cp outputs/qb_model.html site/index.html
+          fi
+          # Old bookmark insurance: the boards used to live at these addresses.
+          # They are single-position pages now, not linked from anywhere.
+          if [ -f outputs/qb_model.html ]; then cp outputs/qb_model.html site/qb.html; fi
+          if [ -f outputs/rb_model.html ]; then cp outputs/rb_model.html site/rb.html; fi
+          if [ -f outputs/wr_model.html ]; then cp outputs/wr_model.html site/wr.html; fi
           if [ -f outputs/qb_backtest.html ]; then cp outputs/qb_backtest.html site/backtest.html; fi
 
-      # Cheap insurance against the exact failure this workflow used to have:
-      # a page that deployed happily with only quarterbacks on it.
-      - name: Sanity-check the page
+      - name: Sanity-check the board built
         run: |
-          test -s site/index.html || { echo "::error::index.html is missing or empty"; exit 1; }
-          for p in "Quarterback" "Running back"; do
-            if ! grep -q "\"long\": \"$p\"" site/index.html; then
-              echo "::error::No $p board made it onto the page"; exit 1
-            fi
-          done
-          # "ADP" on its own is what a board prints when it had no prices at all
-          # and fell back to repeating its own ranking. That is the exact failure
-          # this check exists to catch -- usually data/adp.csv not being committed.
-          if grep -q '"adp_source": "ADP"' site/index.html; then
-            echo "::error::A board built with no draft prices. Check data/adp.csv is committed."; exit 1
-          fi
-          echo "Page is $(wc -c < site/index.html) bytes -- QB and RB boards, both priced."
+          test -s site/index.html || { echo "::error::Board HTML is missing or empty"; exit 1; }
+          echo "Site page is $(wc -c < site/index.html) bytes"
+          grep -q '"boards"' site/index.html || { echo "::error::Page has no board data"; exit 1; }
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

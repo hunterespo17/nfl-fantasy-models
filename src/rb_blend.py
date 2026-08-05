@@ -202,7 +202,7 @@ SIGNALS = {
     "ypt": "Yards per target",
     "career_games": "Career games",
     "age": "Age",
-    "durability": "Durability (games/17)",
+    "durability": "Durability (3-yr, games/17)",
     "plays_pg": "Team plays/gm",
     "pass_rate": "Team pass rate",
     "implied_total_avg": "Team implied total (last yr)",
@@ -388,6 +388,7 @@ def _clay_bundle(c: dict | None, ppr: float = 0.5) -> dict | None:
         "healthy_recent": False,
         "prev_ppg": np.nan,
         "prev_games": np.nan,
+        "dur3": np.nan,
         "prev_team": None,
         "prior_source": "clay",
         "trust_override": ROOKIE_TRUST,
@@ -652,9 +653,14 @@ def _bundle(pdf: pd.DataFrame, as_of: int) -> dict | None:
         # a tiny sample to judge a body on, and reading only the most recent one
         # writes off a durable back who happened to break a bone. Tested on
         # seasons the fit never saw, three years beats one at both positions.
-        # Only availability.py uses it -- the Availability index still reads last
-        # season on purpose, so fresh news moves a rank faster than a mean does.
+        # This is the flat mean, which only availability.py uses. The
+        # Availability index reads `dur3` just below -- same three years, but
+        # weighted toward the recent one.
         "prev_games3": float(prior_sorted["games"].tail(3).mean()),
+        # Three years of availability, weighted toward the recent one. See
+        # availability.DUR_WEIGHTS for why this is not just last season.
+        "dur3": availability.durability(
+            list(prior_sorted["games"].tail(3))[::-1]),
         # How big last season's job was, on a 0-to-1 scale where 1 is a genuine
         # workhorse's 18 carries a game. Only used to work out how many games he
         # plays NEXT year -- a back who missed time while carrying a real load is
@@ -710,7 +716,7 @@ def entering_profiles(sa: pd.DataFrame, team_season: pd.DataFrame,
                 # what a pick at a given price returns per game.
                 "actual_games": float(cur.get("games", np.nan)),
                 "age": season - birth.get(str(pid), np.nan),
-                "durability": b["prev_games"] / 17.0,
+                "durability": b.get("dur3", np.nan),
                 "win_total": win_totals().get((season, cur["team"])),
                 # Vegas's own number for how many points this team scores, from
                 # the lines posted for the front of THIS season -- not from what
@@ -1037,7 +1043,8 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     if "pass_rate" in p.columns:
         p["neg_pass"] = -pd.to_numeric(p["pass_rate"], errors="coerce")
     p["Situation"] = pd.concat([pct("plays_pg"), pct("neg_pass")], axis=1).mean(axis=1)
-    # Age curve x last year's durability. Both look backwards, and that is the
+    # Age curve x his three-year durability, weighted toward last season.
+    # Both look backwards, and that is the
     # whole of it -- NOTE WHAT IS DELIBERATELY NOT IN HERE: this year's news.
     #
     # It used to be. The games ratio was multiplied in as a third term, on the
@@ -1358,7 +1365,7 @@ def build_upcoming(sa, team_season, players, current_map, season,
             "team": cm.get("team"),
             "actual_ppg": np.nan,
             "age": season - birth.get(pid, np.nan),
-            "durability": b["prev_games"] / 17.0,
+            "durability": b.get("dur3", np.nan),
             "win_total": win_totals().get((season, cm.get("team"))),
             "implied_fwd": implied_totals().get((season, cm.get("team"))),
             "is_starter": cm.get("is_starter"),

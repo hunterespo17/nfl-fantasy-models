@@ -449,6 +449,46 @@ def durability_risk(hist_games) -> float:
     return float(np.clip((RISK_CEILING - float(hist_games)) / span, 0.0, 1.0))
 
 
+# ---------------------------------------------------------------------------
+# DURABILITY -- how much of a season this body has been good for
+# ---------------------------------------------------------------------------
+# This used to be last season alone, on the argument that fresh news should move
+# a rank faster than a mean does. That argument was right about the direction
+# and wrong about the size. One season is seventeen games, and a single broken
+# bone in it wipes out a quarter of a player's Availability score no matter what
+# the two years either side of it say -- CeeDee Lamb played 13, 15 and 17 and
+# was being scored as though 13 were the whole story.
+#
+# So it is three years now, weighted toward the recent one rather than averaged
+# flat, which keeps most of what the old argument wanted:
+#
+#     last season          0.50     <- still half the vote, so news still moves
+#     the season before    0.30
+#     three years back     0.20
+#
+# Missing years are dropped and the rest re-weighted, so a second-year player is
+# scored on the one season he has rather than punished for not having three.
+DUR_WEIGHTS = (0.50, 0.30, 0.20)
+
+
+def durability(games_recent_first) -> float:
+    """Share of a season this player has been available for, 0 to 1.
+
+    Takes games played in each of the last three seasons, MOST RECENT FIRST.
+    """
+    if games_recent_first is None:
+        return float("nan")
+    vals, wts = [], []
+    for g, w in zip(list(games_recent_first)[:len(DUR_WEIGHTS)], DUR_WEIGHTS):
+        if g is None or pd.isna(g):
+            continue
+        vals.append(float(g))
+        wts.append(w)
+    if not vals:
+        return float("nan")
+    return float(np.clip(np.average(vals, weights=wts) / SEASON_WEEKS, 0.0, 1.0))
+
+
 def clear_cache() -> None:
     """Forget both files. Only needed by tests and weight sweeps."""
     _HAND.clear()

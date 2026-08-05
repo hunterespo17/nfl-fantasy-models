@@ -552,6 +552,7 @@ def _clay_bundle(c, ppr: float = 0.5) -> dict | None:
         "prev_ppg": np.nan,
         "prev_games": np.nan,
         "prev_games3": np.nan,
+        "dur3": np.nan,
         # A rookie has no last season, so this is left blank on purpose --
         # availability.py reads the blank three-year record and uses the rookie
         # number instead of the line. See ROOKIE_GAMES there.
@@ -887,6 +888,10 @@ def _bundle(pdf: pd.DataFrame, as_of) -> dict | None:
         "prev_ppg": float(last["total_fp_pg"]) if pd.notna(last["total_fp_pg"]) else np.nan,
         "prev_games": float(last["games"]),
         "prev_games3": float(prev3["games"].mean()),
+        # Three years of availability, weighted toward the recent one. See
+        # availability.DUR_WEIGHTS for why this is not just last season.
+        "dur3": availability.durability(
+            list(prev3.sort_values("season", ascending=False)["games"])),
         # How big last season's job was, 0 to 1, where 1 is a true alpha's nine
         # targets a game. Only availability.py reads it, and only to work out how
         # many games he plays NEXT year. Without it "played 11 games" describes
@@ -960,7 +965,7 @@ def entering_profiles(sa: pd.DataFrame, team_season, players, pool) -> pd.DataFr
                 "actual_ppg": float(cur["total_fp_pg"]) if pd.notna(cur["total_fp_pg"]) else np.nan,
                 "actual_games": float(cur["games"]),
                 "age": age,
-                "durability": (b["prev_games"] / 17.0) if pd.notna(b["prev_games"]) else np.nan,
+                "durability": b.get("dur3", np.nan),
                 "win_total": wt.get((season, team)),
                 "implied_fwd": fwd.get((season, team)),
                 **b,
@@ -1247,7 +1252,8 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     # version is the mirror of the backs': they want the run, this wants the pass.
     p["Situation"] = pd.concat([pct("plays_pg"), pct("pass_rate")], axis=1).mean(axis=1)
 
-    # ---- AVAILABILITY. Age curve times durability. Not a percentile -- an
+    # ---- AVAILABILITY. Age curve times his three-year durability, weighted
+    # toward last season. Not a percentile -- an
     # absolute read, so a healthy field doesn't manufacture injury risk.
     dur = pd.to_numeric(p.get("durability"), errors="coerce")
     p["Availability"] = [
@@ -1586,7 +1592,7 @@ def build_upcoming(sa, team_season, players, current_map, season, pool) -> tuple
             "actual_ppg": np.nan,
             "actual_games": np.nan,
             "age": age,
-            "durability": (b["prev_games"] / 17.0) if pd.notna(b.get("prev_games")) else np.nan,
+            "durability": b.get("dur3", np.nan),
             "win_total": wt.get((season, team)),
             "implied_fwd": fwd.get((season, team)),
             "is_starter": bool(cm.get("is_starter", False)),
