@@ -966,7 +966,15 @@ function ptsAt(c){return ptsAtK(c,KN,A,B);}
    changes along the board, so the contribution bars read the local one instead
    of one slope for everybody. */
 function slopeAt(c){return (ptsAt(c+0.5)-ptsAt(c-0.5));}
-function projOf(q){return ptsAt(composite(q));}
+/* A workload ceiling, when the board published one. Running backs carry it:
+   the scale above is a percentile map, so it hands a third-stringer the same
+   floor it hands a starter, and a player can't score points he never had the
+   ball for. `ceil` is CEIL_BASE + CEIL_SLOPE x expected touches, computed in
+   src/rb_blend.py -- this only has to enforce it, and it has to enforce it here
+   rather than trusting the stored projection because every slider move
+   re-projects the whole board from the composite. */
+function capped(p,q){return (q&&q.ceil!=null)?Math.min(p,q.ceil):p;}
+function projOf(q){return capped(ptsAt(composite(q)),q);}
 
 /* --- availability ---------------------------------------------------------
    projOf is a RATE: what he scores in a game he plays. A draft board is a
@@ -1028,7 +1036,7 @@ function ctxFor(pos){
 function rateIn(x,ctx){
   const s=ctx.gs.reduce((t,g)=>t+(ctx.w[g]||0),0)||1;
   const c=ctx.gs.reduce((t,g)=>t+(ctx.w[g]||0)*(x.indices[g]??50),0)/s;
-  return ptsAtK(c,ctx.kn,ctx.a,ctx.b);
+  return capped(ptsAtK(c,ctx.kn,ctx.a,ctx.b),x);
 }
 function projIn(x,ctx){return blendAvail(rateIn(x,ctx),x,ctx.pos);}
 

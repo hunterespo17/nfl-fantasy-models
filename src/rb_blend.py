@@ -75,6 +75,34 @@ MIN_CAL_ROWS = calibration.MIN_ROWS   # kept as an alias; the real one lives the
 # PPR this constant needs to move to about 2.5.
 TARGET_MULT = 1.8
 
+# The most points a back can score off a given workload.
+#
+# This is a physical bound, not a projection. The composite is a bell that
+# bottoms out near the 50th percentile, and the calibration curve maps a
+# composite of 50 to about 7.3 points a game -- so before this cap existed,
+# EVERY rostered back projected around 7 regardless of whether he was going to
+# touch the ball. A team's five backs summed to 27 points a game when a real
+# backfield produces 20. It never moved the draft order (those players sit 64th
+# and below), but it was wrong.
+#
+# Measured on 1000 RB seasons, 2018-2025, 4+ games: half-PPR points per weighted
+# touch has a p99 envelope that is flat at 0.89-1.00 for any workload of 3+
+# touches a game. It only appears to blow up below that, and when you list those
+# seasons they are all the same thing -- fullbacks and emergency call-ups who
+# vultured a goal-line score on almost no work (85% of them under 4 touches/gm,
+# 46% under half a season). That is why the line gets a small intercept instead
+# of running through the origin: the intercept covers the touchdown a low-work
+# back can steal, the slope covers everything earned.
+#
+#     0.0 + 1.29 x touches   1.0% of real seasons above it
+#     1.0 + 1.10 x touches   0.3%   <- this
+#     1.5 + 0.90 x touches   0.3%
+#
+# It binds on about 38 of 100 rows and on NOBODY in the top 36 -- Gibbs' ceiling
+# is 23.1 against a 21.6 projection, so the top of the board is untouched.
+CEIL_BASE = 1.0     # points a back can score on essentially no workload
+CEIL_SLOPE = 1.10   # additional points per weighted touch per game
+
 # What share of his own team's backfield work a back actually went on to take,
 # by the slot he entered the season in. Measured over 653 back-seasons from
 # 2018-2025, not assumed:
@@ -160,6 +188,7 @@ SIGNALS = {
     "targets_pg": "Targets/gm",
     "opp_pg": "Weighted touches/gm (last yr)",
     "opp_blend": "Weighted touches/gm · blended w/ role",
+    "ppg_ceiling": "Most pts/gm this workload can produce",
     "bf_share": "Backfield share (of team RB work)",
     "bf_carry_share": "Share of team RB carries",
     "bf_target_share": "Share of team RB targets",
@@ -1161,6 +1190,17 @@ def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
     # No bends -> apply() is the same straight line this always was.
     knots = ((extra or {}).get("calibration") or {}).get("knots") or []
     cur["proj_ppg"] = calibration.apply(cur["composite"], a, b, knots)
+
+    # Nobody scores points he never had the ball for. See CEIL_BASE/CEIL_SLOPE:
+    # the curve above is a percentile map, so it happily hands a third-stringer
+    # the same 7 points a game it hands a starter's floor. Clip to what his
+    # expected workload can physically produce. Rows with no workload estimate
+    # are left alone rather than guessed at.
+    _w = pd.to_numeric(cur.get("opp_blend"), errors="coerce")
+    cur["ppg_ceiling"] = CEIL_BASE + CEIL_SLOPE * _w
+    cur["proj_ppg"] = np.where(_w.notna(),
+                               np.minimum(cur["proj_ppg"], cur["ppg_ceiling"]),
+                               cur["proj_ppg"])
     cur["position"] = "RB"
     # Rank on SEASON value, not on rate. A draft board is a season-value list --
     # that is what ADP is pricing -- and until this line existed a back expected
@@ -1189,6 +1229,11 @@ def _assemble(cur: pd.DataFrame, a: float, b: float, bt: dict, weights: dict,
             "starter": bool(row.get("is_starter")) if row.get("is_starter") is not None else None,
             "depth_rank": (int(row["depth_rank"]) if pd.notna(row.get("depth_rank")) else None),
             "proj_ppg": round(float(r["proj_ppg"]), 2),
+            # The workload ceiling travels with the row because the page
+            # re-projects everybody itself every time a slider moves. Without it
+            # published here, dragging any weight would hand the third-stringers
+            # their 7 points a game straight back.
+            "ceil": _r(row, "ppg_ceiling"),
             "proj_total": round(float(r["proj_points_total"]), 1),
             "tier": int(r["tier"]),
             "vor": round(float(r["vor"]), 1),
