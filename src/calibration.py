@@ -124,6 +124,121 @@ MIN_GAMES = 8
 # noise. These ship to the page, so they also stay small on purpose.
 N_KNOTS = 15
 
+# How much of the top-end slope survives past the last knot. See `apply` for the
+# argument; the short version is that above the top knot there is no data, so the
+# curve should get less confident rather than more.
+HI_DAMP = 0.5
+
+
+# ---------------------------------------------------------------------------
+# The fourth bug: the weights were never the weights
+# ---------------------------------------------------------------------------
+# The other three bugs in this file are about the conversion from composite to
+# points. This one is upstream of it, in how the composite gets built at all,
+# and it took the tight-end board to expose it -- but it was never a tight-end
+# problem. All four boards had it.
+#
+# Every factor is scored as a percentile inside its season. A percentile rank is
+# UNIFORM by construction: the gap from the 95th to the 99th is four points, the
+# same four points as from the 50th to the 54th, no matter what the underlying
+# measure did in between. That is fine for a factor whose raw values are spread
+# evenly. It is destructive for one whose raw values are right-skewed -- which
+# is every usage measure in football, because a handful of players get fed and a
+# long tail of backups do not.
+#
+# The tell was Trey McBride. He beat Sam LaPorta on every single input -- 9.3
+# targets a game against 5.8, a 0.270 target share against 0.187, more air
+# yards, more yards per route, more first downs per route, more routes run --
+# and came out BEHIND him on the board. The reason: those enormous raw gaps sat
+# inside about three percentile points, because both men are near the top of a
+# crowded list. Meanwhile Arizona's implied total is genuinely the worst in the
+# league and Detroit's near the best, and team quality has no skew at all --
+# thirty-two teams spread evenly -- so Vegas kept its full 0-100 range and swung
+# nearly eight points of composite on its own.
+#
+# Measured across the top twenty-four of each board, weight x spread -- the say a
+# factor ACTUALLY gets -- came out:
+#
+#     board   biggest separator in practice        what it should have been
+#     QB      Talent      (w32, spread 22)  7.15   Talent -- healthy
+#     RB      Vegas       (w10, spread 31)  3.07   Talent w14 got 1.11
+#     WR      Vegas       (w14, spread 22)  3.04   Volume w19 got 0.99
+#     TE      Vegas       (w9,  spread 29)  2.59   Volume w22 got 1.45
+#
+# On three of the four boards the single strongest separator was a factor with a
+# middling weight, and the heaviest-weighted usage factor was doing about a third
+# of its job. Those weights came off honest univariate fits against next season's
+# points. The board simply wasn't using them.
+#
+# THE OBVIOUS FIX IS THE WRONG ONE, and the numbers said so. Muting Vegas --
+# either halving its spread or halving its weight -- was tested first, and it
+# HURT: paired against the shipped board on the same rows, halving the Vegas
+# weight came out -0.028 points per game on tight ends (better on only 16% of
+# bootstrap resamples), -0.007 on quarterbacks, -0.004 on backs. It helped
+# receivers (+0.047) and nowhere else. Vegas is not too loud. It is doing real
+# work, and turning it down throws away signal to make the board LOOK more
+# sensible. That is what over-correcting looks like from the inside.
+#
+# What actually works is giving the usage factors their distance back. Push each
+# percentile through the inverse normal curve: the tails stretch, the middle
+# stays put. Every rank inside every factor is preserved EXACTLY -- this cannot
+# reorder a single player within a factor. Only the gaps change, and they change
+# back toward the shape the raw numbers already had.
+#
+# Paired bootstrap against the shipped board, same rows, same seasons, same
+# walk-forward, positive = better:
+#
+#     board   gain (pts/game)   better on
+#     QB      +0.038            72% of resamples
+#     RB      +0.077            88%
+#     WR      +0.063            83%
+#     TE      +0.018            73%
+#
+# The only one of seven variants tested that improved all four. And the boards it
+# produces move toward sanity without ever being told to: McBride to TE1 and
+# Brock Bowers from 9th to 5th, Justin Jefferson from WR10 to WR5, Ashton Jeanty
+# into the RB top six from outside it, Kyler Murray into the QB top six.
+#
+# SPREAD is not a tuned knob. 15, 20 and 25 were all tested: 15 and 20 agree to
+# three decimals, because a pure rescale of every factor is absorbed by the
+# calibration slope downstream. The only non-linear thing here is the clip at the
+# ends, and at 20 it bites at about the top and bottom half-percent. If the gain
+# moved when SPREAD moved, the gain would be coming from the clip rather than
+# from the transform -- which would be a reason not to ship it.
+SPREAD = 20.0
+_CLIP = 0.005                      # keeps the inverse normal finite at the ends
+
+
+def stretch(s, spread: float = SPREAD) -> pd.Series:
+    """Percentile (0-100) -> same order, tails given their gaps back.
+
+    Rank-preserving and monotone, so nothing this touches can reorder players
+    within a factor. Standard library only -- no scipy import, because scipy is
+    not in requirements.txt and this has to run on a laptop that only ever ran
+    `pip install -r requirements.txt`.
+    """
+    from statistics import NormalDist
+    inv = NormalDist().inv_cdf
+    v = pd.to_numeric(pd.Series(s), errors="coerce")
+    raw = v.to_numpy(dtype="float64")
+    u = np.clip(raw / 100.0, _CLIP, 1.0 - _CLIP)
+    z = np.array([inv(float(x)) for x in u])
+    out = np.clip(50.0 + spread * z, 0.0, 100.0)
+    return pd.Series(np.where(np.isnan(raw), np.nan, out), index=v.index)
+
+
+def stretch_groups(p: pd.DataFrame, groups) -> pd.DataFrame:
+    """Apply `stretch` to every factor column, in place.
+
+    Called at exactly one point in each board -- after the factor columns are
+    final and before they are averaged into the composite -- so what ships is
+    the same thing the backtest above measured, not a near relative of it.
+    """
+    for g in groups:
+        if g in p.columns:
+            p[g] = stretch(p[g]).fillna(50.0)
+    return p
+
 
 def drafted_picks(pos: str = "RB") -> dict:
     """(season, name-key) -> draft pick, for everyone actually drafted that year.
@@ -158,9 +273,32 @@ def apply(comp, a: float, b: float, knots=None):
     change here has to be made there too -- there is a test that projects the
     same board both ways and compares.
 
-    Outside the fitted range it keeps going at whatever slope the end bend had,
-    rather than flattening off, so an unusually good or bad score still moves the
-    number. Never below zero.
+    Outside the fitted range it keeps going rather than flattening off, so an
+    unusually good or bad score still moves the number. Never below zero.
+
+    THE TOP END IS DAMPED, and it is worth saying why, because the obvious version
+    of this is wrong in a way that is invisible until you plot the board.
+
+    Above the last knot there is nobody. The slope up there was measured off the
+    final pair of knots -- the two thinnest, luckiest points in the whole fit, the
+    handful of players who happened to finish first -- and it is also the STEEPEST
+    slope on the curve, because the curve bends up at the top. Running that slope
+    out past the data multiplies the noisiest number by the largest lever, with
+    nothing above it to argue back.
+
+    On the 2026 running back board that produced a visible artefact: Bijan
+    Robinson, Christian McCaffrey and Jahmyr Gibbs all landed past the top knot
+    and got extrapolated to 22.5 / 20.9 / 20.8 while RB4 sat at 14.8 -- a 6.0 point
+    step between RB3 and RB4. Real seasons do not do that. Over 2018-2025 the
+    median RB3 -> RB4 step is 0.6 and the largest was 2.3. And a projection is an
+    EXPECTATION, so it should be smoother than a realised season, not lumpier:
+    the man who actually finishes RB1 got the breaks, and we do not know who he is.
+
+    So beyond the fitted range the slope used is the average across the top third
+    of the knots rather than the last pair -- a less noisy read on how steep the
+    top of the board really is -- and it is halved, which is a plain statement that
+    confidence falls off outside the data. Still monotone, so nothing reorders;
+    the top of the board just stops running away from the rest of it.
     """
     c = np.asarray(comp, dtype="float64")
     if not knots or len(knots) < 2:
@@ -169,7 +307,15 @@ def apply(comp, a: float, b: float, knots=None):
     ky = np.array([float(k[1]) for k in knots], dtype="float64")
     out = np.interp(c, kx, ky)
     lo_slope = (ky[1] - ky[0]) / (kx[1] - kx[0]) if kx[1] > kx[0] else 0.0
-    hi_slope = (ky[-1] - ky[-2]) / (kx[-1] - kx[-2]) if kx[-1] > kx[-2] else 0.0
+
+    # Top third of the fitted range, not the final pair. Falls back to the last
+    # pair when there are too few knots for a third to mean anything.
+    j = max(0, len(kx) - max(2, len(kx) // 3))
+    hi_slope = ((ky[-1] - ky[j]) / (kx[-1] - kx[j])) if kx[-1] > kx[j] else 0.0
+    if not np.isfinite(hi_slope) or hi_slope <= 0:
+        hi_slope = (ky[-1] - ky[-2]) / (kx[-1] - kx[-2]) if kx[-1] > kx[-2] else 0.0
+    hi_slope *= HI_DAMP
+
     out = np.where(c < kx[0], ky[0] + lo_slope * (c - kx[0]), out)
     out = np.where(c > kx[-1], ky[-1] + hi_slope * (c - kx[-1]), out)
     return np.clip(out, 0, None)

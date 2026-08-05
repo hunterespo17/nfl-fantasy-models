@@ -1,76 +1,104 @@
 """
-WIDE RECEIVER PROJECTIONS -- the same machine as the backs, aimed at a different job.
+TIGHT END PROJECTIONS -- the receivers' machine, re-fitted to a position that
+only lets one man play.
 
-Read src/rb_blend.py first. The shape here is deliberately identical -- season
+Read src/wr_blend.py first. The shape here is deliberately identical -- season
 aggregates, entering profiles, percentile indices, a weighted composite, a
-calibration curve fitted to what receivers actually scored -- so that everything
-downstream (ratings, report, the site) needs no new plumbing. What follows is
-only the places where a receiver is not a running back, and why.
+calibration curve fitted to what tight ends actually scored -- so that everything
+downstream (ratings, report, the site) needs no new plumbing. Nothing in the
+FRAMEWORK is new. What follows is only the places where a tight end is not a
+wide receiver, and every one of them is a measurement rather than an opinion.
+
+Everything below was fitted on the same cached 2018-2025 nflverse data the other
+three boards use: 1,028 tight end seasons, 95.4% snap coverage (96.4% on seasons
+of eight games or more), 472 back-to-back pairs.
 
 WHAT IS DIFFERENT, AND WHY
 --------------------------
 
-VOLUME IS THE WHOLE ARGUMENT, AND IT IS A DIFFERENT VOLUME. A back's opportunity
-is touches. A receiver's is targets, and targets are not his to take -- they are
-allocated by somebody else, from a pool the offence decides the size of. So the
-two numbers that matter are his SHARE of that pool and the pool's SIZE, and they
-have to be carried separately. Measured on 998 receiver seasons 2018-2025,
-target share correlates 0.64 with next season's points per game and repeats at
-0.74 year to year; targets per game 0.66 and 0.73. Nothing else on the position
-is close on both axes at once.
+THE SIGNAL ORDER IS THE SAME. VOLUME STILL WINS. Against next season's points
+per game, and how well each repeats year to year: WOPR 0.72/0.81, receiving
+yards per game 0.75/0.78, points per game 0.74/0.74, target share 0.72/0.79,
+targets per game 0.71/0.78, air yards share 0.70/0.81, catches per game
+0.70/0.75, yards per route 0.62/0.60, route share 0.59/0.68, first downs per
+route 0.57/0.55, touchdowns 0.55/0.43, yards per catch 0.26/0.28, average depth
+of target 0.20/0.40, yards after catch per catch 0.09/0.13. Same conclusion the
+receivers' file reached, on a different population: how much a man is thrown at
+beats how well he does with it, and it is not close.
 
-EFFICIENCY GETS MODERATE WEIGHT AND NOT A GRAM MORE. This is the biggest
-judgement call in the model and it is knowingly against the fashionable view.
-Yards per route run correlates 0.56 with next year and repeats at only 0.55;
-first downs per route run 0.55 and 0.57. Both are real. Both are beaten by
-simply counting targets. Efficiency is how you separate two receivers with the
-same job, not how you find out who has the job.
+BUT ROUTE SHARE IS A WEAKER SIGNAL HERE, AND THE GATE HAS TO MOVE. At receiver,
+route share correlates 0.66 with next season. At tight end it is 0.59, and the
+level is completely different: the average TE1 runs 73% of his team's routes,
+which is BELOW the receivers' 75% gate. Screening tight ends at the receivers'
+bar would fail the median starter at the position. See ROUTE_GATE.
 
-ROUTES ARE ESTIMATED, NOT COUNTED. Routes run is not in free nflverse data, so
-every per-route rate here divides by `offense_pct x team dropbacks`. Two things
-make that safe rather than sloppy: it validated at 99.2% coverage against the
-weekly file, and every rate divides by the SAME estimate, so swapping in a real
-routes column later is a one-line change and nothing downstream moves. The one
-trap is the denominator itself -- pbp's `pass` column is already 1 on every
-sack, so dropbacks are `sum(pass)`, NOT `pass + sack`. Counting sacks twice
-makes every route estimate 6% generous and every efficiency rate 6% harsh.
+YARDS PER ROUTE BEATS FIRST DOWNS PER ROUTE -- the exact reverse of receiver.
+0.62 against 0.57 on next season, 0.60 against 0.55 on repeatability. So
+FD_EFF_W flips from the receivers' 0.55 to 0.45. Heath's first-down insight
+still earns its badge; it just stops leading the efficiency blend.
 
-TOUCHDOWNS ARE THROWN AWAY AND REBUILT. A receiver's TD count correlates 0.556
-with next season's; his receiving YARDS correlate 0.585 -- volume predicts a
-man's touchdowns better than his touchdowns do. So the count is pulled hard
-toward a yards-based expectation (K_TD 18, against the backs' 10: a full season
-keeps under half its own scores) and the gap between the two is published, so a
-14-touchdown year reads as the warning it is rather than as evidence.
+YARDS AFTER CATCH IS NOISE. 0.09 against next season, 0.13 year to year. It is
+still shown on the panel, because it is one of the numbers tight ends get argued
+about with, and showing it next to what actually predicts is the point.
 
-THE WINDOW IS A SLOPE, NOT A CLIFF. Backs fall off a table; receivers walk down
-a ramp. Change in points per game entering each season: year two +0.6, year
-three +0.6, year four -0.1, year five -0.1, year six -1.4, year seven and later
--0.8 to -1.6. So WINDOW_SCORES is flatter than the running-back version at both
-ends, and a proven receiver in year six is docked, not written off.
+THE DEPTH CHART IS A CLIFF, NOT A SLOPE. This is the single biggest structural
+difference at the position. Receiver rooms share; tight end rooms do not -- one
+man plays and the rest block. Mean route share and team target share by rank
+within a team-season: TE1 0.727 / 0.147 / 6.82 ppg, TE2 0.450 / 0.068 / 2.99,
+TE3 0.283 / 0.045 / 1.83, TE4 0.186 / 0.035 / 1.40. The TE1-to-TE2 target share
+gap is a factor of 2.2. The WR1-to-WR2 gap is a factor of 1.28. Because the job
+carries that much more information here, VOL_ROLE_W goes up from 0.30 to 0.35.
 
-VEGAS MATTERS MORE HERE THAN IT DOES AT RUNNING BACK. Season-long, a team's
-implied total correlates +0.62 with what its receivers score and only +0.34 with
-what its backs score; forward-looking on the early lines the model actually
-uses, +0.41 against +0.25. The backs' board carries Vegas at 10. This one
-carries it at 14.
+VEGAS MATTERS ABOUT TWO THIRDS AS MUCH AS IT DOES AT RECEIVER, AND IT ARRIVES BY
+A DIFFERENT ROAD. A team's implied total correlates +0.31 with what its tight
+end room scores, against +0.54 for its receivers and +0.52 for its backs; on the
+early lines the model actually reads, +0.25 against +0.40 and +0.40. So the
+weight comes down from the receivers' 14 to 9. The mechanism is worth knowing,
+because it changes where the weight goes: a high implied total buys the TE room
+touchdowns (+0.41) and points (+0.31) far more than it buys targets (+0.10), and
+it buys the room's SHARE of the passing pool essentially nothing (+0.03). Rising
+tides raise tight ends by putting them in the end zone, not by throwing to them
+more. That is why Scoring goes UP from 4 to 6 as Vegas comes down.
 
-NO SPREAD FACTOR. The spread is already inside the model -- implied total IS
-(total line + spread) / 2. Adding spread on top moves R-squared 0.0273 to 0.0284
-and the leftover coefficient comes out negative, which is double-counting with
-extra steps. Game script turns out not to be a volume story anyway: receiver
-targets go 7.2 to 6.9 between good and bad script. What moves is scoring, so
-script belongs inside the touchdown expectation, which is where it is.
+NO SPREAD FACTOR, for the same reason as the other boards -- implied total IS
+(total line + spread) / 2. Adding spread on top of it moves R-squared 0.0296 to
+0.0296 and leaves a coefficient of +0.001.
 
-THE CEILING SHIPS ON DAY ONE. The projection scale is a percentile map, so an
-uncapped fourth receiver is handed the same seven points a game as a starter's
-floor and a team's receiving room sums to more points than any real offence
-produces. Fitted the same way as the backs' -- see CEIL_SLOPE.
+CROWDED ROOMS DO NOT EXIST AT THIS POSITION, SO NOTHING IS FLAGGED. The
+receivers' board names five crowded offences without deducting anything. I ran
+the equivalent test here and there is nothing to name: across 254 TE1 seasons,
+the TE1's points per game correlates +0.004 with the second tight end's route
+share. TE1s average 7.83 points a game when the TE2 runs 15-30% of routes, 6.98
+when the TE2 runs more than half. A blocking tight end is not competition. The
+constant stays in the file as an empty set so nothing downstream has to change.
 
-NO DEPTH-CHART HISTORY, AND IT TURNS OUT NOT TO MATTER. data.get_depth_history()
-is running-back only. Rather than fake one, historical role is read off MEASURED
-route share, which exists for every season and is the thing a depth chart is
-trying to guess anyway. Only the upcoming season uses a published depth chart,
-because for the upcoming season there is nothing measured to use instead.
+THE CAREER WINDOW OPENS LATER AND STAYS OPEN LONGER. Within-player change in
+points per game entering each season: year 2 +0.40, year 3 +0.29, year 4 +0.28,
+year 5 -0.69, year 6 -0.05, year 7 -0.18, year 8 -0.89, year 9 -1.39. The peak
+is year four, not year two, and the decline does not really begin until year
+eight. Receivers peak at two-to-three and start walking down at six. So the
+explicit table runs to year seven here rather than year five.
+
+TOUCHDOWNS ARE REGRESSED HARDER THAN ANYWHERE ELSE ON THE SITE. A tight end's
+touchdown count predicts next season's at 0.433; a yards-based expectation
+predicts it at 0.550 -- the gap is wider than at receiver, so the count deserves
+less of itself. K_TD is 40 against the receivers' 18 and the backs' 10: a
+sixteen-game season keeps 29% of its own scores.
+
+ROUTES ARE ESTIMATED, NOT COUNTED -- inherited unchanged from the receivers'
+file, including the trap in the denominator. pbp's `pass` column is already 1 on
+every sack, so dropbacks are `sum(pass)`, NOT `pass + sack`.
+
+THE CEILING SHIPS ON DAY ONE, and it is steeper here because the position's
+points come in lumps. See CEIL_SLOPE.
+
+ONE THING THIS BOARD DOES NOT DO, SAID OUT LOUD. Replacement level for tight end
+comes out of rankings.replacement_ranks() as TE12 -- twelve teams, one starter,
+and none of the flex spot, which the league config splits between backs and
+receivers only. In a real 12-team half-PPR league some managers do start a second
+tight end in the flex. That would push replacement nearer TE14-15 and lift every
+tight end's value against the field. It is a LEAGUE setting, not a modelling
+choice, so it is left alone and flagged here rather than quietly changed.
 """
 from __future__ import annotations
 
@@ -86,93 +114,112 @@ from . import availability, calibration, config, rankings, scoring  # noqa: F401
 # ---------------------------------------------------------------------------
 
 # How hard a touchdown count is pulled toward what his yardage says it should
-# have been. Measured on 864 back-to-back receiver seasons: blending at K=18
-# predicts next year's touchdowns at 0.601, against 0.556 for the raw count and
-# 0.585 for the yards expectation alone. The curve is flat from 18 to 40, so
-# this is the gentlest setting that gets the full benefit. A 16-game season
-# keeps 47% of its own scores. The backs use 10 -- receivers get regressed
-# harder because a receiver's touchdowns are a smaller sample of a noisier
-# event, and the plan is explicit that the count has to be rebuilt, not trimmed.
-K_TD = 18.0
+# have been. Measured on 472 back-to-back tight end seasons. The raw count
+# predicts next year's at 0.433 and a yards-based expectation at 0.550 -- so
+# unlike receiver, where the two were close, here the count is clearly the worse
+# of the two numbers and is treated accordingly. Blending:
+#
+#     K=18  0.528     K=40  0.5457  <- this
+#     K=24  0.536     K=50  0.5482
+#     K=30  0.541     K=60  0.5497
+#                     K=120 0.5517  (the peak, and effectively "ignore the count")
+#
+# The curve is flat from 40 up, so 40 is the gentlest setting that gets the
+# benefit. A 16-game season keeps 29% of its own scores, against 47% at receiver
+# and 62% at running back. Tight end touchdowns are the noisiest event the site
+# projects: a red-zone role can appear and vanish with one coordinator change.
+K_TD = 40.0
 
 # How much career length is worth against one season's rate, in the talent
-# blend. Same as the backs: a receiver with 60 career games is trusted on his
-# own numbers, one with 12 is mostly told what his job implies.
-K_CAREER = 10.0
+# blend. Higher than the receivers' 10, and measured. A tight end's career-to-
+# date rate correlates with what he does this season at 0.508 when he has 6-11
+# career games behind him, 0.697 at 12-19, 0.738 at 20-34 and 0.766 at 35-59 --
+# so a half-season of career snaps is genuinely uninformative, worse than the
+# 27-row 1-5 game bucket. 14 puts the halfway point of trust at 14 career games,
+# which is where the measured curve actually crosses.
+K_CAREER = 14.0
 
-# What counts as a season worth learning from. Receivers miss fewer games than
-# backs, so this goes back up to the honest twelve rather than the backs' ten.
-HEALTHY_GAMES = 12
+# What counts as a season worth learning from. Down from the receivers' 12 to
+# the backs' 10, and measured rather than assumed. A season's points per game
+# predicts the next season's at 0.539 when it is 7-9 games long, 0.710 at 10-12,
+# 0.710 at 13-15 and 0.696 at 16-17. The break is at ten, and it is a real
+# break, not a slope. Cumulatively the sample peaks there too: 10+ games gives
+# 0.748 against 0.740 at 12+ and 0.729 at 14+, so demanding twelve throws away
+# rows without buying accuracy.
+HEALTHY_GAMES = 10
 
-# How many seasons back the model will look. Four, same as the backs -- a fifth
-# year of a receiver's twenties is a different player.
+# How many seasons back the model will look. Four, and now measured rather than
+# inherited. Each prior season on its own predicts at 0.741 (one year back),
+# 0.657 (two), 0.593 (three) -- and then 0.638 and 0.632, which is survivorship,
+# not signal: only the good ones are still playing five years later. As a
+# weighted blend the last N seasons predict at 0.741 (N=1), 0.749, 0.751, 0.753,
+# 0.753. Four is the last N that buys anything at all.
 RECENCY = 4
 
-# Games before a career record outweighs what the job implies.
+# Career games before a player is allowed onto the board on his own record. This
+# is an INCLUSION floor, not a trust weight -- anyone Clay projects comes on
+# regardless, which is how rookies and new starters get rows.
 MIN_CAREER_GAMES = 6
 MIN_CAL_ROWS = calibration.MIN_ROWS
 
 # ---------------------------------------------------------------------------
 # THE WORKLOAD CEILING
 # ---------------------------------------------------------------------------
-# Measured on 1,533 receiver seasons 2018-2025 with 4+ games. Half-PPR points
-# per target has a 99th-percentile envelope that flattens out for any real
-# workload -- 2.08 at six-to-eight targets a game, 2.06 at eight-to-ten, 1.99
-# above ten -- so a straight line through it caps nobody who matters.
+# Measured on 829 tight end seasons 2018-2025 with 4+ games. Half-PPR points per
+# target has a 99th-percentile envelope of 2.50 at two-to-four targets a game,
+# 2.31 at four-to-six, 2.01 at six-to-eight and 1.78 above eight -- steeper than
+# the receivers' at every workload, because tight end scoring is lumpier: a
+# six-target tight end who catches two touchdowns has a bigger week than a
+# six-target receiver ever will.
 #
-# Candidates, and what share of real receiver seasons finished above each:
+# Candidates, and what share of real tight end seasons finished above each:
 #
-#     1.0 + 1.75 x targets    5.3% of all seasons, 5.5% of 3+ target seasons
-#     1.0 + 1.85 x targets    3.4%   2.7%
-#     1.0 + 1.90 x targets    2.8%   1.9%   <- this
-#     1.0 + 2.00 x targets    2.2%   1.3%
-#     1.0 + 2.10 x targets    1.5%   0.6%
+#     1.0 + 1.60 x targets    8.2% of all seasons, 10.2% of 3+ target, 9.0% of 5+
+#     1.0 + 1.80 x targets    4.8%   4.0%   2.3%
+#     1.0 + 2.00 x targets    2.9%   2.0%   0.8%   <- this
+#     1.0 + 2.10 x targets    2.3%   1.0%   0.8%
 #
-# 1.90 is where it stops binding on anybody the board will ever project and
-# starts binding hard on the bottom of it. At 1.5 targets a game it allows 3.8
-# points; real receivers at that workload have a 95th percentile of 3.6. At ten
-# targets a game it allows 20.0, and the best receiver season in eight years was
-# 20.0. The 43 seasons it clips are Davante Adams 2020, Tyreek Hill 2020 and
-# Deebo Samuel 2021 -- historic touchdown years nobody should be projecting.
+# 2.00 clips 24 seasons of 829, and the list is exactly who it should be: mostly
+# Taysom Hill, who is a quarterback filed at tight end and whose points do not
+# come from targets at all, plus Tucker Kraft 2025, Jared Cook 2019, Will Dissly
+# 2019, Robert Tonyan 2020 and Mark Andrews 2024 -- historic touchdown seasons
+# nobody should be projecting forward.
 #
 # Anything this clips MUST be published on the row and re-applied in the page's
 # JavaScript, because the reader recomputes every projection on every slider
 # drag. See _assemble(), and `capped()` in src/report.py.
 CEIL_BASE = 1.0
-CEIL_SLOPE = 1.90
+CEIL_SLOPE = 2.00
 
 # ---------------------------------------------------------------------------
 # WHAT A DEPTH-CHART SLOT IS ACTUALLY WORTH
 # ---------------------------------------------------------------------------
-# Mean route share by receiver rank within team-season, on 1,451 seasons of
-# measured snap data 2018-2025. Unlike the backs' SLOT_SHARE these do not sum to
-# one, because they are not shares of a fixed pool -- each is that receiver's
-# own share of his team's dropbacks, which is what a route share is.
+# Mean route share by tight end rank within team-season, on measured snap data
+# 2018-2025. Same construction as the receivers' table -- each is that player's
+# own share of his team's dropbacks -- and the contrast with it is the whole
+# story of the position:
 #
-#   rank      n    mean    median    p25     p75    mean ppg
-#   WR1     256    0.840   0.851    0.785   0.898     11.2
-#   WR2     256    0.746   0.753    0.689   0.807      8.7
-#   WR3     256    0.606   0.606    0.532   0.682      6.4
-#   WR4     255    0.405   0.416    0.318   0.488      3.9
-#   WR5     243    0.260   0.254    0.164   0.357      2.4
-#   WR6     185    0.172   0.164    0.080   0.247      1.5
-SLOT_ROUTE = {1: 0.840, 2: 0.746, 3: 0.606, 4: 0.405, 5: 0.260, 6: 0.172}
+#   rank      n    route share   team target share   mean ppg      (WR route)
+#   TE1     254      0.727            0.147            6.82          0.840
+#   TE2     254      0.450            0.068            2.99          0.746
+#   TE3     202      0.283            0.045            1.83          0.606
+#   TE4      75      0.186            0.035            1.40          0.405
+#   TE5      10      0.145            0.030            1.46          0.260
+#
+# The receivers' rows walk down. These fall off a step. A team's second receiver
+# still runs three quarters of the routes; a team's second tight end runs fewer
+# than half, and is targeted less than half as often as the first.
+SLOT_ROUTE = {1: 0.727, 2: 0.450, 3: 0.283, 4: 0.186, 5: 0.145}
 
 # Mean TEAM target share at each rank, from the same rows. This is what Role
 # converts into an expected volume when a player has no measured season to read.
-SLOT_TGT_SHARE = {1: 0.233, 2: 0.182, 3: 0.140, 4: 0.088, 5: 0.057, 6: 0.039}
+SLOT_TGT_SHARE = {1: 0.147, 2: 0.068, 3: 0.045, 4: 0.035, 5: 0.030}
 
 # HOW MUCH OF THE SPOT COMES FROM LAST SEASON RATHER THAN THE PUBLISHED CHART.
-# Entering a season there are two readings of where a receiver sits: where he
-# actually ranked in routes last year, and where his team lists him in August.
-# Neither is right on its own. The tape is a measurement, but it is a
-# measurement of LAST year's team, and of however healthy he happened to be --
-# a number one who missed six weeks on a bad ankle ranks like a number two
-# without having lost the job. The chart is this year's information, including
-# every trade and signing, but it is still somebody's guess made in shorts.
-#
-# So the spot is a weighted average of the two, and the weight is how much the
-# tape deserves to be believed:
+# Inherited unchanged from the receivers' board, where it was argued out in full:
+# the tape is a measurement of last year's team and of however healthy he was;
+# the chart is this year's information but is somebody's guess made in shorts.
+# The weights are how much the tape deserves to be believed.
 #
 #   played 17 last year, same team   0.75 on the tape   -- we watched it
 #   played 13                        0.53               -- half a story
@@ -188,118 +235,142 @@ TAPE_W_MOVED = 0.15
 # ---------------------------------------------------------------------------
 # THE TWO SCREENS FROM HEATH'S RESEARCH
 # ---------------------------------------------------------------------------
-# THE ROUTE GATE. 88% of receivers who went on to score 12+ points a game had
-# cleared 75% route share the year before. On 912 back-to-back pairs, clearing
-# it was worth 9.9 points a game next season against 4.8, and 31.4% reached 12+
-# against 4.8%. That is not a slider, it is a gate -- so it is published as a
-# flag and left for the reader to filter on rather than folded into a weight.
-ROUTE_GATE = 0.75
+# THE ROUTE GATE, RE-FITTED. The receivers' gate is 0.75. It cannot be used here:
+# among tight ends with eight or more games the median route share is 0.503 and
+# the 75th percentile is 0.684, so the average starting tight end -- the TE1 row
+# above, at 0.727 -- sits below the receivers' bar. A 0.75 screen at this
+# position fails most of the players it is supposed to find.
+#
+# Re-fitted on 472 back-to-back pairs, of the 33 tight end seasons that reached
+# 10 points a game, the share that had cleared each gate the year before:
+#
+#     0.50 -> 91%      0.70 -> 76%
+#     0.60 -> 88%      0.75 -> 73%
+#     0.65 -> 88%      0.80 -> 61%
+#
+# 0.65 is the last bar that still holds 88% of the hits, and it separates: 140
+# tight ends cleared it, scoring 7.04 points a game the following season against
+# 3.48, with 20.7% reaching double digits against 1.3%.
+#
+# Note the bar for "worth having" is 10 points a game here, not the receivers'
+# 12. That is the position, not a softer test -- 10 ppg is a top-six tight end.
+ROUTE_GATE = 0.65
 
 # THE FIRST-DOWN BADGE. First downs per route run, on a real sample of routes.
 #
-# Heath states this one at 0.115, and 0.115 is NOT the number here, which needs
-# saying out loud. His routes are charted; ours are estimated -- snap share times
-# team dropbacks -- and the two denominators are not the same size, so his
-# constant does not survive the trip. Measured on ours, 0.115 flags 21 receiver
-# seasons out of 855: a needle, not a screen, and a needle that separates WORSE
-# than a looser bar because it has stopped describing a population.
+# Same argument as the receivers' file: Heath states this at 0.115, his routes
+# are charted and ours are estimated, so the constant does not survive the trip
+# and has to be re-fitted rather than copied. Tight end rates run lower again --
+# among tight ends with 150+ estimated routes the median is 0.0385 and the 90th
+# percentile 0.0736, so the receivers' 0.095 flags nobody at all.
 #
-# So the number is re-fitted and his idea kept. Across 855 seasons with 250+
-# estimated routes, sorted by what the receiver did the FOLLOWING year:
+# Across 395 seasons with 200+ estimated routes, sorted by the FOLLOWING year:
 #
-#     0.080  ->  203 flagged, 11.2 ppg next season vs 5.6, 44% reach 12+
-#     0.095  ->   87 flagged, 12.2 ppg next season vs 6.3, 58% reach 12+
-#     0.100  ->   59 flagged, 12.5 ppg next season vs 6.5, 59% reach 12+
-#     0.115  ->   21 flagged, 12.4 ppg next season vs 6.8, 52% reach 12+
+#     0.060  ->  87 flagged, 7.69 ppg next season vs 4.13, 25.3% reach 10+
+#     0.065  ->  71 flagged, 7.99 ppg next season vs 4.24, 28.2% reach 10+
+#     0.070  ->  55 flagged, 8.31 ppg next season vs 4.36
 #
-# 0.095 is the last threshold that is still a screen -- roughly the top tenth of
-# receivers, the widest gap on the table, and a filter that returns a dozen names
-# on a 128-man board instead of three.
+# The route minimum drops from the receivers' 250 to 200 for the same reason the
+# gate moved: tight ends run fewer routes, and 250 would exclude most starters.
 #
-# It is a BADGE, not a factor, and deliberately so: the edge concentrates almost
-# entirely at the top of the board (+2.1 points for receivers already scoring
-# 13+, +1.5 in the 10-13 band, +0.8 in the 7-10 band), so weighting the whole
-# board on it would be reading a top-of-market signal into the middle rounds.
-FD_RR_BADGE = 0.095
-FD_RR_MIN_ROUTES = 250
+# It is a BADGE, not a factor, and deliberately so: the edge concentrates at the
+# top of the board (+0.07 points for tight ends already scoring 5-8, +0.41 in the
+# 8-11 band, +2.97 above 11), so weighting the whole board on it would be reading
+# a top-of-market signal into the last two rounds.
+FD_RR_BADGE = 0.065
+FD_RR_MIN_ROUTES = 200
 
 # ---------------------------------------------------------------------------
-# CROWDED ROOMS
+# CROWDED ROOMS -- MEASURED, AND THERE IS NOTHING THERE
 # ---------------------------------------------------------------------------
-# Named, not modelled, and honestly labelled as such. Heath's claim is that
-# crowded receiver rooms suppress everyone in them; I could not reproduce it. My
-# own teammate test -- how a receiver does with one, two or three team-mates
-# above 60% route share -- came out 8.5, 8.9 and 7.7 points a game, which is no
-# effect at all. His claim is about ADP, not production: crowded rooms are
-# priced as though somebody must lose, and that is a market observation worth
-# showing rather than a projection input worth applying. So these five 2026
-# offences get a flag on the row and nothing is deducted anywhere.
-CROWDED_TEAMS = {"CIN", "LA", "LAR", "DET", "DAL", "CHI"}
+# The receivers' board names five crowded offences and deducts nothing, on the
+# grounds that the crowding claim is about ADP rather than production. At tight
+# end there is not even that much to say. Across 254 TE1 seasons, the TE1's
+# points per game correlates +0.004 with the second tight end's route share and
+# -0.177 with the second tight end's target share -- and by band, the TE1
+# averages 7.83 points a game when his backup runs 15-30% of routes, 6.69 at
+# 30-50%, and 6.98 above half. There is no monotone effect to model, and the
+# reason is obvious once stated: the second tight end is usually on the field to
+# block, and a blocking tight end is not competition for targets.
+#
+# The name stays so that _row_flags and the site do not have to change shape.
+# The set is empty because the honest answer is that nothing belongs in it.
+CROWDED_TEAMS: set[str] = set()
 
 # ---------------------------------------------------------------------------
 # THE CAREER WINDOW
 # ---------------------------------------------------------------------------
-# Change in points per game entering each season, measured on 614 back-to-back
-# pairs: year 2 +0.6, year 3 +0.6, year 4 -0.1, year 5 -0.1, year 6 -1.4, year 7
-# and later -0.8 to -1.6. A ramp up, a plateau, and a slow walk down -- compare
-# the backs, who go 90/100/95/85/55 and then fall off the end of the table.
-WINDOW_SCORES = {1: 78.0, 2: 100.0, 3: 100.0, 4: 92.0, 5: 84.0}
-WINDOW_LATE = 58.0        # year six and beyond, no elite season behind him
-WINDOW_PROVEN = 72.0      # same, but he has actually been a WR16 -- docked, not written off
+# Change in points per game entering each season, measured WITHIN player so that
+# survivorship cannot flatter the late years: year 2 +0.40, year 3 +0.29, year 4
+# +0.28, year 5 -0.69, year 6 -0.05, year 7 -0.18, year 8 -0.89, year 9 -1.39.
+#
+# So the position climbs for three seasons, peaks in year four, dips, holds a
+# plateau through years six and seven and only then goes. The rate of finishing
+# as a TE12 backs it up: year 1 8.5%, year 2 12.1%, year 3 10.2%, year 4 14.0%,
+# year 5 10.1%, year 6 16.4%, year 7 15.5%, year 8 14.0%.
+#
+# Compare receivers, who peak at years two and three and are docked from six, and
+# backs, who fall off the end of the table entirely. A 28-year-old tight end in
+# his sixth season is not an old player; he is usually a player who has just
+# figured it out. The explicit table therefore runs to year seven here, and
+# add_indices switches to the LATE score at year eight rather than year six.
+WINDOW_SCORES = {1: 76.0, 2: 86.0, 3: 94.0, 4: 100.0, 5: 85.0, 6: 84.0, 7: 81.0}
+WINDOW_LATE = 64.0        # year eight and beyond, no elite season behind him
+WINDOW_PROVEN = 76.0      # same, but he has actually been a TE6 -- docked, not written off
 
-# What counts as having proved it. The board's replacement level is WR30-36, so
-# "elite" has to sit meaningfully inside that: top 16 in a season, on a real
-# sample of games.
-ELITE_RANK = 16
+# What counts as having proved it. The receivers' board uses top 16 against a
+# replacement level of WR30-36. Replacement here is TE12, so the equivalent
+# "meaningfully inside it" mark is top 6, on a real sample of games.
+ELITE_RANK = 6
 ELITE_MIN_GAMES = 8
 
 # ---------------------------------------------------------------------------
 # DRAFT CAPITAL
 # ---------------------------------------------------------------------------
-# Next-season points per game by round: R1 9.9, R2 8.7, R3 9.7, R4 7.0, R5 6.3.
-# A LEVEL indicator only -- year-over-year change is flat across every round, so
-# capital tells you where a receiver starts and nothing about where he is going.
-# The R3 number above R2 is 30 rows of noise, so the scale below is smoothed
-# monotonic rather than fitted to it.
+# Next-season points per game by round, years one to five: R1 7.10, R2 5.52,
+# R3 4.50, R4 3.84, R5 3.34, R6 2.35, R7 2.21, undrafted 2.56. Cleanly monotonic
+# -- cleaner than the receivers' table, where R3 came out above R2 on noise --
+# and worth about 14.7 points of this scale per point of ppg.
 #
-# It fades out over three seasons, because after three years of real snaps the
-# snaps are the better evidence and the draft slot is just a fact about 2023.
-DRAFT_SCORE = {1: 100.0, 2: 82.0, 3: 78.0, 4: 52.0, 5: 40.0, 6: 32.0, 7: 28.0}
-DRAFT_UNDRAFTED = 22.0
+# The undrafted number sitting a hair above round seven is 46 rows against 21 and
+# well inside noise, so the scale below is smoothed monotonic rather than fitted
+# to it. It fades out over three seasons, because after three years of real snaps
+# the snaps are the better evidence and the draft slot is just a fact about 2023.
+DRAFT_SCORE = {1: 100.0, 2: 77.0, 3: 62.0, 4: 52.0, 5: 45.0, 6: 30.0, 7: 28.0}
+DRAFT_UNDRAFTED = 25.0
 DRAFT_FADE_SEASONS = 3.0
 
 # The most of the Talent factor draft capital is ever allowed to be. It used to
 # be all of it in year one, which meant a rookie's own projection did not touch
-# his Talent score at all.
+# his Talent score at all. Carried across from the receivers' board.
 DRAFT_MAX_W = 0.6
 
 # How much of Volume comes from the job the depth chart implies rather than the
-# targets he actually got. A shade higher than the backs' 0.25 because receiver
-# roles carry over more cleanly than backfield splits do.
-VOL_ROLE_W = 0.30
+# targets he actually got. Up from the receivers' 0.30, because of the slot table
+# above: the TE1-to-TE2 target share gap is a factor of 2.2 against the
+# WR1-to-WR2 gap of 1.28. Knowing which tight end a team plays tells you more
+# than knowing which receiver it plays, so the job is allowed to carry more.
+VOL_ROLE_W = 0.35
 
-# Within Volume, how the two best predictors split. Target share (0.64 next-year,
-# 0.74 sticky) and targets per game (0.66, 0.73) are close enough to even that
-# splitting them evenly is the honest answer.
+# Within Volume, how the two best predictors split. Target share (0.72 next-year,
+# 0.79 sticky) and targets per game (0.71, 0.78) are as close here as they were
+# at receiver, so an even split is still the honest answer.
 TS_VOL_W = 0.5
 
 # Within Efficiency, how first downs per route split against yards per route.
-# First downs are the better stability bet (0.57 against 0.55) and the one Heath
-# built his screen on, so they lead slightly.
-FD_EFF_W = 0.55
+# THIS IS FLIPPED FROM THE RECEIVERS' BOARD, and it is a measurement, not a
+# preference: at receiver first downs lead on both axes (0.55/0.57 against
+# 0.56/0.55). At tight end yards per route wins both (0.62/0.60 against
+# 0.57/0.55). So the number goes from 0.55 to 0.45 and yards per route leads.
+FD_EFF_W = 0.45
 
 # How many finished seasons the upcoming one is measured against. Every factor
 # on this board is a rank inside its own season, and the upcoming season is a
-# shorter list than a finished one -- about 130 receivers off a depth chart
-# against 180 to 200 who actually played. A shorter list has a lower ceiling:
-# eighth of 129 can only reach the 94.6th percentile, eighth of 190 reaches the
-# 96.3rd. That is roughly two points of composite surrendered on every factor
-# at once, for no reason but the length of the list, and the points scale is
-# steep at the top -- it came out as about two points a game missing from the
-# whole upper board. So the upcoming season is not ranked against itself. Each
-# of its raw numbers is placed into the last three finished seasons one at a
-# time and the three placements averaged, which is drift-proof and puts the
-# answer on exactly the scale the points curve was fitted on.
+# shorter list than a finished one. A shorter list has a lower ceiling, which
+# costs the whole upper board points for no reason but the length of the list.
+# So the upcoming season is not ranked against itself: each of its raw numbers is
+# placed into the last three finished seasons one at a time and the three
+# placements averaged. Argued out in full in src/wr_blend.py.
 REF_SEASONS = 3
 
 NEWS_W = 1.0
@@ -308,24 +379,22 @@ GUIDE_GAMES_FLOOR = availability.GUIDE_FLOOR
 
 # How much of a rookie's row may lean on somebody else's projection.
 #
-# This is the shrink weight a rookie gets in place of the career-games curve,
-# and 0.5 was too little. A veteran needs ten career games to earn 0.5, so a
-# rookie was being told his whole projected season counts for as much as ten
-# games of somebody else's snaps. It is also a second regression: the Clay row
-# is already a smoothed full-season expectation -- _clay_bundle deliberately
-# does not regress it on the way in, and then this pulled it halfway to the pool
-# floor anyway. 0.7 leaves real uncertainty on a player nobody has watched take
-# an NFL snap without flattening the eighteen of them onto one number.
+# Carried across from the receivers' board, where 0.5 was found to be too little:
+# a veteran needs ten career games to earn 0.5, so a rookie was being told his
+# whole projected season counts for as much as ten games of somebody else's
+# snaps. It is also a second regression -- the Clay row is already a smoothed
+# full-season expectation. 0.7 leaves real uncertainty on a player nobody has
+# watched take an NFL snap without flattening the whole class onto one number.
 ROOKIE_TRUST = 0.7
 
 # ---------------------------------------------------------------------------
 # WHAT THE PLAYER PANEL SHOWS
 # ---------------------------------------------------------------------------
 # Raw column -> the label a human reads. Adding a key here surfaces that column
-# on the detail panel; it does not put it in the model. Several of these are
-# here precisely BECAUSE they are not in the model -- yards per catch (0.13
-# against next season), yards after catch per catch (0.10) and average depth of
-# target (0.01) are the three numbers receivers get argued about with, and
+# on the detail panel; it does not put it in the model. Several are here
+# precisely BECAUSE they are not in the model -- yards per catch (0.26 against
+# next season), average depth of target (0.20) and yards after catch per catch
+# (0.09, which is noise) are numbers tight ends get argued about with, and
 # showing them next to the ones that actually predict is the fastest way to see
 # why the board disagrees with the argument.
 SIGNALS = {
@@ -354,26 +423,33 @@ SIGNALS = {
 # ---------------------------------------------------------------------------
 # THE WEIGHTS
 # ---------------------------------------------------------------------------
-# Volume, Opportunity and Role are 44 of the 100 between them, which is the
-# plan's central claim made arithmetic: at this position the job is most of the
-# answer. Efficiency at 11 is "moderate" as promised -- enough to separate two
-# receivers with the same job, not enough to invent one.
+# Volume, Opportunity and Role are 47 of the 100 between them -- more than the
+# receivers' 44, which is the slot table made arithmetic. At a position where the
+# second man on the depth chart is targeted less than half as often as the first,
+# having the job IS most of the answer.
 #
-# Vegas at 14 is the one number lifted straight from the research rather than
-# from taste. The backs' board has it at 10; a team's implied total correlates
-# nearly twice as strongly with its receivers' scoring as with its backs'.
+# Three numbers moved off the receivers' board, and all three are measured:
+#
+#   Vegas 14 -> 9    the team-level correlation is +0.31 here against +0.54 there
+#   Role  10 -> 7    route share predicts at 0.59 here against 0.66 there
+#   Scoring 4 -> 6   because of where the Vegas signal went: a high implied total
+#                    buys the tight end room touchdowns (+0.41) far more than it
+#                    buys it targets (+0.10), so the effect belongs in Scoring
+#
+# Efficiency stays at 11 -- the blend inside it flipped, but its total worth
+# against volume did not.
 DEFAULT_WEIGHTS = {
-    "Volume": 19,        # target share + targets per game
-    "Opportunity": 15,   # WOPR -- target share plus air yards share
-    "Vegas": 14,         # implied team total + win total
-    "Efficiency": 11,    # first downs per route + yards per route
-    "Role": 10,          # route share, and what the depth chart implies
+    "Volume": 22,        # target share + targets per game, tilted to the job
+    "Opportunity": 18,   # WOPR -- target share plus air yards share
+    "Efficiency": 11,    # yards per route + first downs per route
+    "Vegas": 9,          # implied team total + win total
     "Talent": 9,         # career rate, shrunk toward the job; draft capital when young
     "Availability": 8,   # age curve x durability
+    "Role": 7,           # route share, and what the depth chart implies
     "Window": 6,         # year in league
-    "Scoring": 4,        # touchdowns, regressed to a volume expectation
+    "Scoring": 6,        # touchdowns, regressed hard to a volume expectation
     "Situation": 4,      # pace and how much the offence throws
-    "Matchup": 0,        # off by default, same as the other two boards
+    "Matchup": 0,        # off by default, same as the other three boards
 }
 GROUPS = list(DEFAULT_WEIGHTS.keys())
 
@@ -423,21 +499,25 @@ def _warn(msg: str) -> None:
 
 
 def _age_curve(age) -> float:
-    """Receivers hold their value later than backs do.
+    """Tight ends hold their value later than anyone else on the board.
 
-    The backs' curve starts docking at 26 and loses 9 points a year. Receivers
-    peak later and decline more slowly -- the window research puts real decline
-    at year six, which for a first-round receiver is age 27-28 -- so this one is
-    flat through 27 and falls at 6 points a year after.
+    Backs start being docked at 26 and lose 9 points a year; receivers at 27 and
+    lose 6. This one is flat through 29 and loses 4, and the reason is in the
+    window numbers above: within-player change in points per game does not go
+    properly negative until year eight, which for a tight end drafted at 22 is
+    age 29. Mean points per game by age band says the same thing even more
+    strongly -- 21-23 4.29, 24-25 3.94, 26-27 3.83, 28-29 4.66, 30-31 4.21,
+    32-34 6.27 -- though that table is heavy with survivorship at the top end,
+    which is exactly why the slope here is gentle rather than positive.
     """
     if age is None or (isinstance(age, float) and np.isnan(age)):
         return 0.85
     a = float(age)
     if a < 22:
         return 0.95
-    if a <= 27:
+    if a <= 29:
         return 1.0
-    return max(0.40, 1.0 - (a - 27) * 0.06)
+    return max(0.40, 1.0 - (a - 29) * 0.04)
 
 
 # ---------------------------------------------------------------------------
@@ -474,7 +554,7 @@ def clay_projections() -> dict:
         return _CLAY
     _CLAY = {}
     try:
-        path = config.DATA_DIR / f"clay_wr_{config.UPCOMING_SEASON}.csv"
+        path = config.DATA_DIR / f"clay_te_{config.UPCOMING_SEASON}.csv"
         if not path.exists():
             return _CLAY
         c = pd.read_csv(path)
@@ -503,7 +583,7 @@ def clay_projections() -> dict:
 
 
 def expected_games() -> dict:
-    return availability.hand_notes("WR")
+    return availability.hand_notes("TE")
 
 
 def _clay_bundle(c, ppr: float = 0.5) -> dict | None:
@@ -585,7 +665,7 @@ def team_dropbacks(pbp: pd.DataFrame | None) -> pd.DataFrame:
 
     `pass` is already 1 on every sack in nflverse play-by-play (checked: all
     1,352 sacks in 2025 carry pass=1 and play_type='pass'), so adding sacks back
-    counts them twice and inflates every receiver's route count by about 6%.
+    counts them twice and inflates every tight end's route count by about 6%.
     That would make every per-route rate 6% harsh and quietly move the badge
     threshold off the value it was fitted at. Dropbacks are `sum(pass)`.
     """
@@ -611,7 +691,7 @@ def team_dropbacks(pbp: pd.DataFrame | None) -> pd.DataFrame:
 def season_aggregates(weekly: pd.DataFrame, scoring_rules: dict | None,
                       snaps: pd.DataFrame | None = None,
                       pbp: pd.DataFrame | None = None) -> pd.DataFrame:
-    """One row per receiver-season, with everything the indices read.
+    """One row per tight-end-season, with everything the indices read.
 
     The weekly file already carries `wopr`, `target_share`, `air_yards_share`
     and `receiving_first_downs`, so opportunity quality needs no derivation at
@@ -647,30 +727,32 @@ def season_aggregates(weekly: pd.DataFrame, scoring_rules: dict | None,
         "fum": (_numf(weekly, ["receiving_fumbles_lost"])
                 + _numf(weekly, ["rushing_fumbles_lost"])),
     })
-    # ---- the team's WHOLE target pool, counted before the receiver filter ----
+    # ---- the team's WHOLE target pool, counted before the position filter ----
     # SLOT_TGT_SHARE was measured off the weekly file's `target_share`, and that
-    # column is a share of everything the offence threw -- backs and tight ends
-    # included, about 35 a game. Summing targets after the WR filter counts only
-    # about 21. Multiplying one by the other understates every receiver's role by
-    # roughly forty per cent, so the pool has to be counted the same way the
-    # shares were: all positions, then divide by games the team actually played.
+    # column is a share of everything the offence threw -- backs and receivers
+    # included, about 35 a game. Summing targets after the TE filter counts only
+    # about 5. The error this guards against is far bigger here than it was on
+    # the receivers' board: multiplying a share-of-everything by a pool-of-tight-
+    # ends-only would understate the position by a factor of seven. So the pool
+    # is counted the same way the shares were: all positions, then divided by the
+    # games the team actually played.
     _all = w[(w["season_type"].str.upper() == "REG") & w["season"].notna()
              & w["team"].notna()]
     team_tgt = (_all.groupby(["season", "team"], as_index=False)
                 .agg(t_tgt=("targets", "sum"), t_gm=("week", "nunique")))
     team_tgt["team_tgt_pg"] = team_tgt["t_tgt"] / team_tgt["t_gm"].replace(0, np.nan)
 
-    w = w[(w["position"] == "WR") & (w["season_type"].str.upper() == "REG")].copy()
+    w = w[(w["position"] == "TE") & (w["season_type"].str.upper() == "REG")].copy()
     w = w[w["season"].notna()]
 
     # A column that came back empty is the one failure this file cannot survive
-    # and will not otherwise announce: the board still builds, every receiver
+    # and will not otherwise announce: the board still builds, every tight end
     # scores zero, and the ranking becomes noise. Catch it at the door.
     for _c in ("targets", "receptions", "rec_yds"):
         if not w.empty and float(w[_c].abs().sum()) == 0.0:
             raise ValueError(
                 f"season_aggregates: every '{_c}' value is zero. The weekly file is "
-                "missing that column or it did not parse — the receiver board would "
+                "missing that column or it did not parse — the tight end board would "
                 "be built on nothing. Re-pull with scripts/01_pull_data.py.")
 
     w["rec_fp"] = w["rec_yds"] * 0.1 + w["rec_td"] * 6.0 + w["receptions"] * ppr
@@ -745,19 +827,19 @@ def season_aggregates(weekly: pd.DataFrame, scoring_rules: dict | None,
 
 
 def _attach_snaps(sa: pd.DataFrame, snaps: pd.DataFrame | None) -> pd.DataFrame:
-    """Snap share per receiver-season. Route share is read straight off this.
+    """Snap share per tight-end-season. Route share is read straight off this.
 
     Two-tier match, and the second tier has to be EARNED. Exact normalised name
     plus team first; the first-initial-plus-surname fallback only where that key
     is unique on both sides of the season.
 
-    That last clause is the whole point. On a single-tier fallback "a brown" is
-    both A.J. Brown and Amon-Ra St. Brown, and averaging their snap shares hands
-    each of them the other's route share -- two of the twelve best receivers in
-    the league, silently wrong, on a number that feeds three separate factors.
-    There are 44 such collisions across eight seasons. Every one of them is
-    resolved by exact name instead, and anything that survives both tiers is
-    warned about rather than guessed at.
+    That last clause is the whole point, and it bites harder here than anywhere.
+    On a single-tier fallback "d smith" is both Dalton Schultz's era-mates and,
+    on this position list, "j smith" collides Jonnu Smith with Jeff Smith, while
+    "t hill" collides Taysom Hill with nobody at all only by luck. Averaging two
+    players' snap shares hands each of them the other's route share, silently,
+    on a number that feeds three separate factors. Anything that survives both
+    tiers is warned about rather than guessed at.
     """
     sa = sa.copy()
     sa["snap_pct"] = np.nan
@@ -766,7 +848,7 @@ def _attach_snaps(sa: pd.DataFrame, snaps: pd.DataFrame | None) -> pd.DataFrame:
     try:
         s = snaps.copy()
         pos = _first(s, ["position", "pos"]).astype(str).str.upper()
-        s = s[pos == "WR"]
+        s = s[pos == "TE"]
         gt = _first(s, ["game_type", "season_type"])
         if gt is not None and gt.notna().any():
             s = s[gt.astype(str).str.upper() == "REG"]
@@ -868,11 +950,12 @@ _BUNDLE_MEANS = [
 
 
 def _bundle(pdf: pd.DataFrame, as_of) -> dict | None:
-    """Recency-weighted read of one receiver, as of the start of `as_of`.
+    """Recency-weighted read of one tight end, as of the start of `as_of`.
 
     Only seasons he was actually available for -- a six-game year is a fact
     about his hamstring, not about his rate -- and only inside the recency
-    window. Weights 0.6 / 0.27 / 0.13, same as the backs.
+    window. Weights 0.6 / 0.27 / 0.13, same as the other three boards, and see
+    RECENCY above for why four years back is the right window at this position.
     """
     hist = pdf[(pdf["season"] < as_of) & (pdf["season"] >= as_of - RECENCY)]
     if hist.empty:
@@ -906,21 +989,25 @@ def _bundle(pdf: pd.DataFrame, as_of) -> dict | None:
         # availability.DUR_WEIGHTS for why this is not just last season.
         "dur3": availability.durability(
             list(prev3.sort_values("season", ascending=False)["games"])),
-        # How big last season's job was, 0 to 1, where 1 is a true alpha's nine
-        # targets a game. Only availability.py reads it, and only to work out how
-        # many games he plays NEXT year. Without it "played 11 games" describes
-        # both a number one who missed six weeks hurt and a fourth receiver who
-        # was simply inactive, and the two are not the same bet. The backs use
-        # carries over 18 and the passers throws over 32 for the same reason.
+        # How big last season's job was, 0 to 1, where 1 is a true every-down
+        # tight end's six targets a game. Only availability.py reads it, and only
+        # to work out how many games he plays NEXT year. Without it "played 11
+        # games" describes both a starter who missed six weeks hurt and a third
+        # tight end who was simply inactive, and the two are not the same bet.
+        # The denominator is 6 rather than the receivers' 9 because that is what
+        # the position's alpha workload actually is: the mean TE1 sees 0.147 of a
+        # 35-target pool, which is 5.1 a game, and the top of the position lives
+        # around six to eight. Leaving it at 9 would have told availability.py
+        # that every tight end in the league is a part-time player.
         "prev_role": float(np.clip(
-            float(last.get("targets_pg") or 0.0) / 9.0, 0.0, 1.0)),
+            float(last.get("targets_pg") or 0.0) / 6.0, 0.0, 1.0)),
         "prev_team": last.get("team"),
         "prior_source": "history",
     })
 
     # TRENDS. Shown, not weighted -- measured against next season these come in
     # at -0.02 and -0.01, which is nothing. They are on the panel because a
-    # receiver whose route share is climbing reads differently to one whose is
+    # tight end whose route share is climbing reads differently to one whose is
     # falling, even when this year's number is identical and the model, quite
     # correctly, cannot tell them apart.
     two = hist.sort_values("season").tail(2)
@@ -954,7 +1041,7 @@ def _merge_team_env(prof: pd.DataFrame, team_season: pd.DataFrame | None) -> pd.
 
 
 def entering_profiles(sa: pd.DataFrame, team_season, players, pool) -> pd.DataFrame:
-    """One row per (receiver, completed season) -- what was knowable beforehand."""
+    """One row per (tight end, completed season) -- what was knowable beforehand."""
     birth = _birth_map(players)
     wt = win_totals()
     fwd = implied_totals()
@@ -1014,12 +1101,12 @@ def _draft_rounds(players) -> dict:
     """player_id -> draft round. Missing means undrafted, which is information.
 
     UNLESS THE CLASS ITSELF IS MISSING. nflverse does not carry a draft round
-    for the incoming class until well after the draft -- every 2026 receiver in
+    for the incoming class until well after the draft -- every 2026 tight end in
     the file has draft_round blank and draft_year blank while carrying
     rookie_season 2026. Reading that blank as "round 0, undrafted" priced
     seventeen of the eighteen rookies on this board at DRAFT_UNDRAFTED, and
     because draft capital has not faded at all in year one, that 22.0 WAS their
-    entire Talent score: a real first-round receiver and a camp body got the
+    entire Talent score: a real first-round tight end and a camp body got the
     same number. A blank on a player whose class predates the file is genuine
     information and still means undrafted; a blank on a player whose class the
     file has not filled in yet means nobody has said, so it comes back None and
@@ -1033,7 +1120,7 @@ def _draft_rounds(players) -> dict:
         return out
     rd_all = pd.to_numeric(players["draft_round"], errors="coerce")
     # A class is "covered" once anybody who entered that year has a round on
-    # file. That keeps a genuinely undrafted 2019 receiver reading as undrafted.
+    # file. That keeps a genuinely undrafted 2019 tight end reading as undrafted.
     rk_col = next((c for c in ("rookie_season", "draft_year", "entry_year")
                    if c in players.columns), None)
     covered = None
@@ -1068,7 +1155,7 @@ def attach_role_window(prof: pd.DataFrame, sa: pd.DataFrame, players) -> pd.Data
     """Depth slot, the job it implies, career year, and availability.
 
     THE HISTORICAL DEPTH SLOT IS NOT A DEPTH CHART. data.get_depth_history() is
-    running-back only, and rather than invent a receiver version this reads the
+    running-back only, and rather than invent a tight-end version this reads the
     slot off MEASURED route share -- rank within team-season. A depth chart is a
     guess at exactly that ranking made in August; where the season is already
     played, the measurement is strictly better information.
@@ -1106,18 +1193,22 @@ def attach_role_window(prof: pd.DataFrame, sa: pd.DataFrame, players) -> pd.Data
         tape_w = tape_w.where(~p["mover"].fillna(False).astype(bool), TAPE_W_MOVED)
     tape_w = tape_w.fillna(TAPE_W_MIN)
 
-    p["slot"] = measured.fillna(live).clip(upper=6)
+    # Clipped at five rather than the receivers' six: SLOT_ROUTE stops at TE5,
+    # because a sixth tight end on a depth chart is a special-teams body and
+    # there were only ten TE5 seasons in eight years to measure in the first
+    # place. Anything deeper reads as a five, which is already 1.5 points a game.
+    p["slot"] = measured.fillna(live).clip(upper=5)
     both = measured.notna() & live.notna()
     p.loc[both, "slot"] = (tape_w[both] * measured[both]
-                           + (1.0 - tape_w[both]) * live[both]).clip(upper=6)
+                           + (1.0 - tape_w[both]) * live[both]).clip(upper=5)
     p["tape_w"] = tape_w.where(both)
 
     # ---- 2. the size of the pool -----------------------------------------
     # The team's whole target pool, shifted forward a season, so a player's role
     # is scaled by how many balls his offence actually throws. season_aggregates
-    # counts this BEFORE the receiver filter, on purpose: SLOT_TGT_SHARE is a
+    # counts this BEFORE the position filter, on purpose: SLOT_TGT_SHARE is a
     # share of all targets, so the pool it multiplies has to be all targets too.
-    # Counting receivers only was a forty-per-cent haircut on every projection.
+    # Counting tight ends only would be a seven-fold haircut on every projection.
     team_pool = (sa.dropna(subset=["team_tgt_pg"])
                  .groupby(["season", "team"], as_index=False)
                  .agg(team_tgt_pg=("team_tgt_pg", "max")))
@@ -1135,7 +1226,7 @@ def attach_role_window(prof: pd.DataFrame, sa: pd.DataFrame, players) -> pd.Data
     # blend away. Every historical row is a whole number anyway, so this leaves
     # the seasons the model is fitted on exactly where they were.
     ks = np.array(sorted(SLOT_ROUTE), dtype=float)
-    slot_f = p["slot"].clip(1, 6).astype(float)
+    slot_f = p["slot"].clip(1, 5).astype(float)
     p["slot_route"] = pd.Series(
         np.interp(slot_f, ks, [SLOT_ROUTE[int(k)] for k in ks]), index=p.index)
     p["slot_tgt_share"] = pd.Series(
@@ -1164,7 +1255,7 @@ def attach_role_window(prof: pd.DataFrame, sa: pd.DataFrame, players) -> pd.Data
 
 
 def _attach_availability(p: pd.DataFrame) -> pd.DataFrame:
-    return availability.attach(p, "WR", NEWS_W, MIN_GAMES_RATIO)
+    return availability.attach(p, "TE", NEWS_W, MIN_GAMES_RATIO)
 
 
 # ---------------------------------------------------------------------------
@@ -1222,7 +1313,7 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     # A MISSING MEASUREMENT IS NOT A ZERO. `wc * v.fillna(0)` reads "he ran no
     # routes" out of "nobody has measured him yet", and then keeps the answer as
     # a real number, which is the expensive half: Opportunity is written as
-    # wopr -> air yards -> Volume precisely so a receiver with no WOPR falls
+    # wopr -> air yards -> Volume precisely so a tight end with no WOPR falls
     # back to his target volume, and a manufactured zero stops that chain from
     # ever firing. Twelve of the eighteen rookies came out on the same
     # 10.6th-percentile Opportunity floor -- not a low score, the same score,
@@ -1291,16 +1382,25 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     wo = pct("wopr_final")
     p["Opportunity"] = wo.fillna(pct("air_yards_share")).fillna(p["Volume"])
 
-    # ---- EFFICIENCY. Both per-route rates, first downs leading slightly.
+    # ---- EFFICIENCY. Both per-route rates, yards leading slightly. This is the
+    # one place the tight-end file reverses the receivers'. There, first downs
+    # per route is the better of the two on both axes. Here yards per route wins
+    # both: 0.618 against next season's points per game where first downs get
+    # 0.572, and 0.601 sticky year to year where first downs get 0.546. So
+    # FD_EFF_W is 0.45, not 0.55, and the yards term is the majority partner.
     p["Efficiency"] = (FD_EFF_W * pct("fd_rr") + (1 - FD_EFF_W) * pct("yprr"))
 
     # ---- ROLE. Measured route share, falling back to the slot table.
     rs = pct("route_share")
     p["Role"] = rs.fillna(pct("role_route"))
 
-    # ---- VEGAS. Implied total and win total. Carries 14 here, against the
-    # backs' 10 -- a team's implied total correlates +0.62 with what its
-    # receivers score and +0.34 with what its backs do.
+    # ---- VEGAS. Implied total and win total. Carries 9 here, against the
+    # receivers' 14 -- a team's implied total correlates +0.31 with what its
+    # tight end room scores, where the same measure gets +0.54 for its receivers
+    # and +0.52 for its backs. Two-thirds strength, so two-thirds the weight.
+    # It arrives mostly through touchdowns (+0.41 with the room's scores) rather
+    # than through targets (+0.10), which is why the Scoring factor next door
+    # matters more here than the raw target counts would suggest.
     p["Vegas"] = pd.concat([pct("win_total"), pct("implied_fwd")], axis=1).mean(axis=1)
 
     # ---- SCORING. The regressed touchdown, not the raw one.
@@ -1308,8 +1408,11 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     if "exp_td" in p.columns:
         p["Scoring"] = pd.concat([pct("exp_td"), pct("td")], axis=1).mean(axis=1)
 
-    # ---- SITUATION. Pace, and how much the offence throws. The receiver
-    # version is the mirror of the backs': they want the run, this wants the pass.
+    # ---- SITUATION. Pace, and how much the offence throws. Same direction as
+    # the receivers' -- pass volume is the friend here, not the run -- but worth
+    # only 4 points against their 8. A tight end's share of the pool barely
+    # moves with the pass rate (+0.03), so a throwing offence lifts him only by
+    # throwing more overall, which the Volume factor is already reading.
     p["Situation"] = pd.concat([pct("plays_pg"), pct("pass_rate")], axis=1).mean(axis=1)
 
     # ---- AVAILABILITY. Age curve times his three-year durability, weighted
@@ -1338,10 +1441,17 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
                            (1 - fade) * tal_pct + fade * cap,
                            np.where(cap.notna(), cap, tal_pct))
 
-    # ---- WINDOW. A ramp, not a cliff.
+    # ---- WINDOW. A ramp, not a cliff, and it runs later than the receivers'.
+    # The boundary moves from year six to year eight because WINDOW_SCORES now
+    # carries real numbers through year seven. Within-player change in points
+    # per game does not go properly negative until year eight (-0.89, then -1.39
+    # in year nine); years six and seven are -0.05 and -0.18, which is flat, and
+    # the TE12-finish rate in those two years is the highest on the table at
+    # 16.4% and 15.5%. Docking a sixth-year tight end the way the receivers'
+    # board does would be backwards.
     win = yr.map(WINDOW_SCORES)
     late = np.where(p.get("proven", False), WINDOW_PROVEN, WINDOW_LATE)
-    p["Window"] = pd.Series(np.where(yr >= 6, late, win), index=p.index).where(yr.notna(), 50.0)
+    p["Window"] = pd.Series(np.where(yr >= 8, late, win), index=p.index).where(yr.notna(), 50.0)
 
     p["Matchup"] = 50.0
 
@@ -1374,7 +1484,7 @@ def composite(p: pd.DataFrame, weights: dict | None = None) -> pd.Series:
     return sum(w * pd.to_numeric(p[g], errors="coerce") for g, w in weights.items()) / total
 
 
-def calibrate(p: pd.DataFrame, pos: str = "WR", info: dict | None = None):
+def calibrate(p: pd.DataFrame, pos: str = "TE", info: dict | None = None):
     return calibration.fit(p, pos=pos, info=info)
 
 
@@ -1387,15 +1497,16 @@ def backtest(p: pd.DataFrame) -> dict:
     Two decisions in here are worth the words, because getting either wrong
     produces a number that looks like a verdict and isn't.
 
-    IT SCORES DRAFTED RECEIVERS ONLY. calibration.py's own bug 1 is "the wrong
+    IT SCORES DRAFTED TIGHT ENDS ONLY. calibration.py's own bug 1 is "the wrong
     crowd": the points scale is fitted on drafted players, because that is the
     crowd the ADP curve it gets subtracted from is built from. Score that scale
-    against every receiver who ever ran a route and roughly half the test set is
-    a WR6 who caught eleven balls all year. The scale says seven points a game;
-    he scored one and a half; "last year he scored one and a half" wins by a mile
-    and the model looks broken. It isn't -- it is being asked about people it was
-    never built to price, and people nobody drafts. Measured on the crowd it
-    ships to, it wins: 2.84 against 2.86, and it orders them better too.
+    against every tight end who ever ran a route and most of the test set is a
+    TE3 who caught eleven balls all year -- and the tight-end pool is worse for
+    this than the receivers', because a third of it is blockers who are on the
+    field for reasons the box score never records. The scale says five points a
+    game; he scored one and a half; "last year he scored one and a half" wins by
+    a mile and the model looks broken. It isn't -- it is being asked about people
+    it was never built to price, and people nobody drafts.
 
     IT NEVER FITS ON THE FUTURE. Each test season is scored by a scale fitted
     only on seasons before it, one at a time, then the errors are pooled. A
@@ -1405,7 +1516,7 @@ def backtest(p: pd.DataFrame) -> dict:
     d = p[p["actual_ppg"].notna() & p["composite"].notna()]
     if d.empty:
         return {}
-    picks = calibration.drafted_picks("WR")
+    picks = calibration.drafted_picks("TE")
     if not picks:
         return {}
     from .adp import norm as _adp_norm       # same key the scale was fitted with
@@ -1427,7 +1538,7 @@ def backtest(p: pd.DataFrame) -> dict:
         # Fit the BENT scale, not just the line, because the bend is what ships.
         # A backtest of a model the board doesn't use is a number about nothing.
         info: dict = {}
-        a, b = calibration.fit(train, pos="WR", info=info)
+        a, b = calibration.fit(train, pos="TE", info=info)
         test = test.copy()
         test["_pred"] = calibration.apply(test["composite"], a, b, info.get("knots") or [])
         chunks.append(test)
@@ -1451,7 +1562,7 @@ def backtest(p: pd.DataFrame) -> dict:
             "baseline_mae": round(mae_base, 2),
             "model_rho": round(float(rho), 3) if pd.notna(rho) else None,
             "baseline_rho": round(float(rho_b), 3) if pd.notna(rho_b) else None,
-            "population": "drafted receivers",
+            "population": "drafted tight ends",
             "seasons": tested}
 
 
@@ -1485,6 +1596,25 @@ def _row_flags(row) -> dict:
     None of these change a projection. They are what the filter dropdown reads
     and what the card shows, and they are computed here rather than in the page
     so that dragging a weight slider cannot move them.
+
+    THE KEY NAMES ARE THE WIRE FORMAT, NOT THE THRESHOLDS. "gate75" is read by
+    name in report.py's filter table, which is deliberately position-blind -- one
+    handler serves every board. The name is the receivers' 75% written into a
+    key; the number it actually tests is this file's ROUTE_GATE, which is 0.65.
+    Renaming it here would mean a second copy of the same handler in the page,
+    so the name stays and the caption on the control says 65%.
+
+    "crowded" is always False on this board. CROWDED_TEAMS is deliberately empty
+    -- a second tight end costs the first nothing measurable (TE1 points against
+    the TE2's route share, r=+0.004 across 254 seasons), so there is nothing to
+    name. The key is kept so every board hands the page the same shape, and the
+    tight-end filter simply doesn't offer the option.
+
+    The two career-year flags run later than the receivers'. "prime" is years
+    three to seven rather than three to five, and "late" starts at eight rather
+    than six, matching the window the model itself scores: within-player change
+    in points per game is flat at years six and seven (-0.05, -0.18) and only
+    turns properly negative in year eight (-0.89).
     """
     rs = _r(row, "route_share", 3)
     fd = _r(row, "fd_rr", 4)
@@ -1496,9 +1626,9 @@ def _row_flags(row) -> dict:
         "gate75": bool(rs is not None and rs >= ROUTE_GATE),
         "fd_badge": bool(fd is not None and rt is not None
                          and rt >= FD_RR_MIN_ROUTES and fd >= FD_RR_BADGE),
-        "prime": bool(yr is not None and 3 <= yr <= 5),
+        "prime": bool(yr is not None and 3 <= yr <= 7),
         "ascending": bool(yr is not None and yr <= 2),
-        "late": bool(yr is not None and yr >= 6),
+        "late": bool(yr is not None and yr >= 8),
         "crowded": team in CROWDED_TEAMS,
         "td_lucky": bool(gap is not None and gap >= 2.0),
         "td_unlucky": bool(gap is not None and gap <= -2.0),
@@ -1516,7 +1646,7 @@ def _assemble(cur, a, b, bt, weights, extra=None) -> dict:
 
     # ---- THE CEILING -----------------------------------------------------
     # An expected-targets number, not last year's -- the same blend Volume
-    # reads, so a receiver whose job grew is capped on the job he has.
+    # reads, so a tight end whose job grew is capped on the job he has.
     _t = pd.to_numeric(cur.get("targets_pg_final"), errors="coerce")
     if _t.isna().all():
         _t = pd.to_numeric(cur.get("targets_pg"), errors="coerce")
@@ -1529,7 +1659,7 @@ def _assemble(cur, a, b, bt, weights, extra=None) -> dict:
                                np.minimum(cur["proj_ppg"], cur["ppg_ceiling"]),
                                cur["proj_ppg"])
 
-    cur["position"] = "WR"
+    cur["position"] = "TE"
     if "proj_games" not in cur.columns:
         cur["proj_games"] = 17.0
     cur["proj_games"] = (pd.to_numeric(cur["proj_games"], errors="coerce")
@@ -1541,7 +1671,7 @@ def _assemble(cur, a, b, bt, weights, extra=None) -> dict:
 
     # Walk the BOARD, not the profile table -- build_rankings has already sorted
     # by value over replacement, and its rank column is `overall_rank`. Reading
-    # a "rank" key that does not exist is how every receiver ends up tied at 999.
+    # a "rank" key that does not exist is how every tight end ends up tied at 999.
     by_id = {str(r["player_id"]): r for r in cur.to_dict("records")}
     payload = []
     for _, br in board.iterrows():
@@ -1601,7 +1731,7 @@ def _assemble(cur, a, b, bt, weights, extra=None) -> dict:
             "injury": row.get("injury") or "",
             "clay_rank": _r(row, "clay_rank", 0),
             "rookie": bool(row.get("prior_source") == "clay"),
-            "wr_flags": flags,
+            "te_flags": flags,
             "indices": {g: _r(row, g, 1) for g in GROUPS},
             "signals": {k: _r(row, k, 4) for k in SIGNALS if k in cur.columns},
         })
@@ -1638,7 +1768,7 @@ def run(weekly, team_season, players, scoring_rules, season, weights=None,
 
 
 def build_upcoming(sa, team_season, players, current_map, season, pool) -> tuple:
-    """A row for every receiver on a 2026 depth chart, history or not."""
+    """A row for every tight end on a 2026 depth chart, history or not."""
     birth = _birth_map(players)
     wt = win_totals()
     fwd = implied_totals()

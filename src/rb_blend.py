@@ -1114,6 +1114,14 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     for gcol in GROUPS:
         p[gcol] = pd.to_numeric(p.get(gcol), errors="coerce").fillna(50.0)
 
+    # Give the factors their gaps back before averaging them. See
+    # calibration.SPREAD: a percentile rank is uniform by construction, so the
+    # right-skewed usage measures lose their distance at the top of the board
+    # exactly where the board is being read, and team quality -- which has no
+    # skew -- ends up the loudest thing on it. Rank-preserving, so this cannot
+    # reorder anyone within a factor; it only changes how far apart they sit.
+    p = calibration.stretch_groups(p, GROUPS)
+
     p["composite"] = composite(p, weights)
     return p
 

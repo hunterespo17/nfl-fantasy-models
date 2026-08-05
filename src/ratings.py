@@ -37,6 +37,7 @@ import numpy as np
 import pandas as pd
 
 from . import adp as adp_mod
+from . import calibration
 from . import qb_blend
 from . import scoring
 
@@ -283,6 +284,19 @@ def _risk_buckets(payload):
 # drags weight sliders and the projection moves underneath these flags, so any
 # "+N over ADP" style chip is built in the browser instead. Everything baked in
 # here is weight-independent.
+
+# The chip thresholds below are all written as PERCENTILES, because that is what
+# they mean and what they were chosen as -- "top third of offences", "bottom
+# quarter on efficiency". The factor columns no longer ship on a raw percentile
+# scale though: calibration.stretch_groups gives the tails their distance back
+# before the composite is averaged, so a raw 70th percentile now reads about
+# 60.5. Rather than bake 60.5 into the source and lose the meaning, PCT()
+# converts a percentile to wherever it now lands. Same chips, same players, and
+# the numbers below still say what they mean.
+def PCT(x: float) -> float:
+    return float(calibration.stretch([x]).iloc[0])
+
+
 def _flags(payload: list, pos: str, S: dict) -> None:
     """Attach q['flags'] -- a list of [tone, text], tone in up/down/warn."""
     pos = str(pos).upper()
@@ -349,14 +363,14 @@ def _flags(payload: list, pos: str, S: dict) -> None:
             # TEAM AND EFFICIENCY. Vegas carries 14 on this board against the
             # backs' 10, so a receiver's offence earns a chip of its own.
             veg = ix.get("Vegas", 50)
-            if veg >= 70:
+            if veg >= PCT(70):
                 up.append(["up", "Winning offense"])
-            elif veg <= 32:
+            elif veg <= PCT(32):
                 dn.append(["down", "Weak team"])
             eff = ix.get("Efficiency", 50)
-            if eff >= 75:
+            if eff >= PCT(75):
                 up.append(["up", "Efficient"])
-            elif eff <= 25:
+            elif eff <= PCT(25):
                 dn.append(["down", "Inefficient"])
 
             # TOUCHDOWN LUCK, both directions. The projection already regresses
@@ -385,6 +399,115 @@ def _flags(payload: list, pos: str, S: dict) -> None:
             # Reported THIS year, which is a different claim from the history
             # above, and the only thing that moves his games count -- so it goes
             # to the front of the bad news.
+            gm, inj = q.get("games"), q.get("injury")
+            if q.get("games_note") and gm is not None:
+                dn.insert(0, ["warn", (f"{inj}, ~{round(float(gm))} games" if inj
+                                       else f"Only {round(float(gm))} games")])
+            elif inj:
+                dn.insert(0, ["warn", f"{inj}, cleared to play"])
+            if q.get("rookie"):
+                dn.insert(0, ["warn", "Rookie -- no NFL games"])
+
+            f = up[:3] + dn[:3]
+            for extra in up[3:] + dn[3:]:
+                if len(f) >= 6:
+                    break
+                f.append(extra)
+            q["flags"] = f
+            continue
+
+        if pos == "TE":
+            # Same two-list construction as the other two, same reason. What
+            # differs is every bar in it: a tight end's numbers live on a
+            # different scale, and copying the receivers' thresholds across
+            # would light up nobody at the top and everybody at the bottom.
+            up, dn = [], []
+            tf = q.get("te_flags") or {}
+
+            # THE JOB FIRST, and here it is even more of the answer than at
+            # receiver: Volume, Opportunity and Role are 47 of the 100 weights.
+            # The gate is 65% of routes, not 75% -- the average TE1 runs 72.7%,
+            # so the receivers' bar sits above the typical starter and would
+            # flag almost nobody. Below 40% is the blocking half of a rotation.
+            if tf.get("gate75"):
+                up.append(["up", "Full-time routes"])
+            else:
+                rs = q.get("route_share")
+                if rs is not None and rs <= 0.40:
+                    dn.append(["down", "Part-time role"])
+            # 14.7% is what the average TE1 sees, so 18% is a genuine first read
+            # and 7% is a man the offence throws to by accident.
+            ts = q.get("target_share")
+            if ts is not None and ts >= 0.18:
+                up.append(["up", f"{round(ts * 100)}% target share"])
+            elif ts is not None and ts <= 0.07:
+                dn.append(["down", "Little of the target pie"])
+
+            rt, tt = q.get("route_trend"), q.get("ts_trend")
+            if rt is not None and rt >= 0.06:
+                up.append(["up", "Role growing"])
+            elif rt is not None and rt <= -0.08:
+                dn.append(["down", "Role shrinking"])
+            if tt is not None and tt >= 0.03:
+                up.append(["up", "Targets trending up"])
+            elif tt is not None and tt <= -0.04:
+                dn.append(["down", "Targets trending down"])
+
+            # HEATH'S BADGE, re-fitted twice over in te_blend.py -- the rate bar
+            # drops to 6.5% and the route minimum to 200. Tight ends who earn it
+            # went for 8.0 points a game the next season against 4.2, and 28% of
+            # them reached a TE1 line against 4% of everyone else.
+            if tf.get("fd_badge"):
+                up.append(["up", "Moves the chains"])
+
+            # CAREER STAGE, and this is where the position parts company with
+            # the other three. The window is years three to SEVEN, and "late"
+            # does not start until year eight, because within-player scoring is
+            # still flat at years six and seven. A 30-year-old tight end is not
+            # the same news as a 30-year-old back.
+            if tf.get("prime"):
+                up.append(["up", "Career window"])
+            elif tf.get("ascending") and cg is not None and cg >= 6:
+                up.append(["up", "Ascending"])
+            if age is not None and age >= old_age:
+                dn.append(["down", f"Age {age}"])
+
+            # TEAM AND EFFICIENCY. Vegas carries only 9 here against the
+            # receivers' 14, so the bar to earn a team chip is higher -- a
+            # team's implied total tracks its tight end room at +0.31, roughly
+            # two-thirds the grip it has on receivers and backs.
+            veg = ix.get("Vegas", 50)
+            if veg >= PCT(75):
+                up.append(["up", "Winning offense"])
+            elif veg <= PCT(28):
+                dn.append(["down", "Weak team"])
+            eff = ix.get("Efficiency", 50)
+            if eff >= PCT(75):
+                up.append(["up", "Efficient"])
+            elif eff <= PCT(25):
+                dn.append(["down", "Inefficient"])
+
+            # TOUCHDOWN LUCK matters more here than anywhere. Vegas reaches a
+            # tight end mainly through scores (+0.41 with the room's touchdowns,
+            # +0.10 with its targets), and the regression is harder -- K_TD is
+            # 40, so a full season keeps under a third of its own count. This
+            # chip is the usual reason the row disagrees with last year's total.
+            if tf.get("td_unlucky"):
+                up.append(["up", "TDs owed back"])
+            elif tf.get("td_lucky"):
+                dn.append(["down", "TD luck to give back"])
+
+            # No crowded-room chip. CROWDED_TEAMS is empty in te_blend.py on
+            # purpose: a second tight end costs the first nothing measurable.
+            if q.get("mover"):
+                dn.append(["warn", "New team"])
+
+            hurt = q.get("avail_risk")
+            if hurt is not None and hurt >= 0.60:
+                dn.append(["warn", "Rarely makes it through a year"])
+            elif hurt is not None and hurt >= 0.35:
+                dn.append(["warn", "Misses games most years"])
+
             gm, inj = q.get("games"), q.get("injury")
             if q.get("games_note") and gm is not None:
                 dn.insert(0, ["warn", (f"{inj}, ~{round(float(gm))} games" if inj
@@ -445,14 +568,14 @@ def _flags(payload: list, pos: str, S: dict) -> None:
 
             # TEAM AND EFFICIENCY -- real, but they move a back less than his role.
             veg = ix.get("Vegas", 50)
-            if veg >= 70:
+            if veg >= PCT(70):
                 up.append(["up", "Winning offense"])
-            elif veg <= 32:
+            elif veg <= PCT(32):
                 dn.append(["down", "Weak team"])
             eff = ix.get("Efficiency", 50)
-            if eff >= 75:
+            if eff >= PCT(75):
                 up.append(["up", "Efficient"])
-            elif eff <= 25:
+            elif eff <= PCT(25):
                 dn.append(["down", "Inefficient"])
 
             # HIS AVAILABILITY RECORD. Three seasons of games plus the size of
@@ -507,7 +630,7 @@ def _flags(payload: list, pos: str, S: dict) -> None:
         # ---- quarterbacks (unchanged) ----
         if cg is not None and 10 <= cg <= 40:
             f.append(["up", "Ascending"])        # the one profile the market underrates
-        if ix.get("Rushing", 50) >= 72:
+        if ix.get("Rushing", 50) >= PCT(72):
             f.append(["up", "Elite rusher"])
         # League-winner reads, from the checklist above. "Elite rusher" is a
         # percentile (best of THIS field); these are absolute bars, so a whole
@@ -518,14 +641,14 @@ def _flags(payload: list, pos: str, S: dict) -> None:
         elif pace is not None and pace < RUSH_ATT_FLOOR:
             f.append(["down", "No rush floor"])
         veg = ix.get("Vegas", 50)
-        if veg >= 70:
+        if veg >= PCT(70):
             f.append(["up", "Strong team"])
-        elif veg <= 32:
+        elif veg <= PCT(32):
             f.append(["down", "Weak team"])
         cast = ix.get("Cast & OL", 50)
-        if cast >= 70:
+        if cast >= PCT(70):
             f.append(["up", "Loaded cast"])
-        elif cast <= 32:
+        elif cast <= PCT(32):
             f.append(["down", "Thin cast"])
         if q.get("mover"):
             f.append(["warn", "New team"])

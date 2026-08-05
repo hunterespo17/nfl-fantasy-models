@@ -110,6 +110,17 @@ def main() -> int:
     ck("scripts/09_check_playcallers.py passes", r.returncode == 0,
        (r.stdout + r.stderr).strip().splitlines()[-1] if (r.stdout or r.stderr) else "")
 
+    # The projection maths exists twice -- once in src/calibration.py for the build,
+    # once in JavaScript inside src/report.py because the page re-projects the whole
+    # board every time a weight slider moves. If the two ever drift, the numbers
+    # change the moment you touch a slider and change back when you reset it, which
+    # is a horrible bug to find by eye. So they get compared on every build.
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "18_check_proj_parity.py")],
+                       capture_output=True, text=True)
+    line = (r.stdout + r.stderr).strip().splitlines()
+    ck("the page projects the same numbers the model does", r.returncode == 0,
+       line[-1].strip() if line else "")
+
     print("\n[4] Git will actually carry the data files")
     # Today .gitignore only excludes data/raw and data/processed, so these four are
     # safe and the "!" lines below them are belt-and-braces. This check is here for

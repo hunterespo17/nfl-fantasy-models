@@ -619,6 +619,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
       finished one — about 130 receivers off a depth chart against 180 to 200 who actually played — and a shorter list
       can't reach as high a percentile, so every receiver would quietly score low. Each of this year's numbers is
       placed into the last three finished seasons instead, and the three placements averaged.</p>
+      <p data-pos="TE">It projects each tight end's <strong>fantasy points per game</strong> the same way the receiver board
+      does — the same factors, the same 0–100 scoring, the same three-season placement for a year nobody has played, and the
+      same sliders on the <strong>TE Rankings</strong> tab. What changed is every number inside, because they were re-fitted
+      on <strong>1,028 tight end seasons from 2018 to 2025</strong> rather than borrowed. The position is different enough
+      that borrowing would have been wrong: the average starting tight end sees <strong>five targets a game</strong>, roughly
+      half a starting receiver's, so bars set on receivers land in the wrong place here almost every time. Where a number
+      moved, the page says what moved it.</p>
       <div id="btstat"></div>
     </div>
     <div class="card">
@@ -646,6 +653,16 @@ _TEMPLATE = r"""<!DOCTYPE html>
       per-route number on forty routes is mostly noise. <strong>Vegas is 14</strong>, higher than the backs' board at 10,
       because a team's implied point total tracks its receivers' scoring nearly twice as closely as its backs'. Touchdowns
       are regressed to what the volume predicts before they count at all.</p>
+      <p data-pos="TE">What share of the projection each factor drives, out of 100%. <strong>The job is even more of the
+      answer here than at receiver</strong> — Volume, Opportunity and Role are 47 of the 100 weights. A tight end's share of
+      his team's targets predicts next season better than anything else he does, and the two efficiency measures are the
+      weakest link in the table, so the board is built on how much work he gets.</p>
+      <p data-pos="TE"><strong>Vegas is 9, not the receivers' 14.</strong> A team's implied point total tracks its tight end
+      room at <strong>+0.31</strong>, against <strong>+0.54</strong> for its receivers — a bit over half the strength, so a
+      bit over half the weight. It also arrives by a different road: a good offence lifts a tight end mainly through
+      <strong>touchdowns</strong> (+0.41) rather than targets (+0.10). His slice of the pie barely widens; the pie gets
+      bigger. <strong>Efficiency is 11</strong>, same as receiver, but the two halves are reversed — yards per route is the
+      better measure here and first downs per route the junior partner, where at receiver it's the other way round.</p>
       <div id="weightBars"></div>
     </div>
     <div class="card" data-pos="QB">
@@ -671,6 +688,32 @@ _TEMPLATE = r"""<!DOCTYPE html>
       they sit on top of it to help you draft:</p>
       <p data-pos="WR">Beyond the projection, each receiver gets a few quick read-outs. These <strong>don't change the projection</strong> —
       they sit on top of it to help you draft:</p>
+      <p data-pos="TE">Beyond the projection, each tight end gets a few quick read-outs. These <strong>don't change the projection</strong> —
+      they sit on top of it to help you draft:</p>
+      <div class="ov" data-pos="TE">
+        <div class="ovh">Floor</div><div>His bad-week baseline — the recency-weighted 25th-percentile game he turns in.
+          Graded <b style="color:var(--good)">Safe</b> / <b style="color:#9a6600">Moderate</b> / <b style="color:var(--neg)">Risky</b> vs the field.
+          Read this one carefully at tight end: outside the top few, a <em>good</em> floor here is a game you'd have benched
+          at any other position, so the grade is relative to the tight ends and nothing else.</div>
+        <div class="ovh">Ceiling</div><div>How often he pops: share of games over <b>20</b> and <b>25</b> points
+          (recent games count more; thin samples pulled toward the field). <b>High</b> / <b>Medium</b> / <b>Low</b>. Very few
+          tight ends ever clear these bars, which is exactly why the ones who do are worth paying for.</div>
+        <div class="ovh">ADP</div><div>Where he's drafted on each platform, as a <b>TE rank</b> — <b>Sleeper</b>, <b>ESPN</b> &amp; <b>FFC</b> (redraft) and
+          <b>Underdog</b> (best-ball). A site only gets a column if it actually prices tight ends in your file. The <b>Market</b> column
+          is a neutral reference: the sites blended and re-ranked, preferring <b>Underdog</b> and <b>FFC</b>, the two you don't draft on.
+          When the platform you're drafting on is part of that blend it's taken back out before he's graded, so no site is measured
+          against a market containing itself. Set <b>&ldquo;Drafting on&rdquo;</b> to your platform and the
+          <b style="color:var(--good)">▲Value</b> / <b style="color:var(--neg)">▼Reach</b> tag flags who your platform drafts
+          <b>earlier or later than that Market</b>.</div>
+        <div class="ovh">Risk at ADP</div><div>Whether his price is worth it: paying an early pick for a shaky floor or thin
+          ceiling — or reaching past where the model ranks him — is risky. A late tight end is low-risk by definition.</div>
+        <div class="ovh">Worth the pick?</div><div>The same value question answered in <b>points</b> instead of draft slots — his
+          projection minus what a pick at his price has historically returned. It moves live with the weight sliders.</div>
+        <div class="ovh">A ceiling on the projection</div><div>No tight end is projected above roughly <b>2.0 points per expected
+          target</b>, plus a point. It binds on <b>24 of 829</b> historical seasons — mostly Taysom Hill, who is a tight end only
+          on paper, plus a handful of genuinely huge touchdown years. At the other end it stops a tight end on two expected
+          targets a game from being projected into a startable week on rate stats alone.</div>
+      </div>
       <div class="ov" data-pos="WR">
         <div class="ovh">Floor</div><div>His bad-week baseline — the recency-weighted 25th-percentile game he turns in.
           Graded <b style="color:var(--good)">Safe</b> / <b style="color:#9a6600">Moderate</b> / <b style="color:var(--neg)">Risky</b> vs the field.
@@ -764,6 +807,43 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <p data-pos="WR">Same rule here as on the other two boards: <strong>the market is smart</strong>. It prices in
       everything the model sees plus camp news, so don't draft <em>against</em> consensus on the model's say-so alone.
       Use the board like this instead:</p>
+      <p data-pos="TE">Same rule here as on the other three boards: <strong>the market is smart</strong>. It prices in
+      everything the model sees plus camp news, so don't draft <em>against</em> consensus on the model's say-so alone.
+      Use the board like this instead:</p>
+      <div class="ov" data-pos="TE">
+        <div class="ovh">ADP is the backbone</div><div>Start from the <b>Market</b> column — that's the neutral anchor. Set
+          <b>&ldquo;Drafting on&rdquo;</b> to your platform to see who your platform prices as a value or reach <em>versus that market</em>.</div>
+        <div class="ovh">Routes before everything</div><div>Same first question as the receiver board, different bar. A tight end
+          who runs a route on <b>65%+</b> of his team's dropbacks averaged <b>7.0 points a game the following season</b> against
+          <b>3.5</b> for everyone else — and <b>20.7%</b> of them went on to a 10-point season against <b>1.3%</b> of the rest.
+          The receivers' 75% bar would have been the wrong screen here: the median tight end who plays a full season runs
+          <b>50%</b> of the routes, so three quarters is a bar the position mostly doesn't clear. 65% was picked because it's
+          where the separation is widest without the group shrinking to a handful.</div>
+        <div class="ovh">Then the chains</div><div><span class="fl g">Moves the chains</span> is the same first-down-per-route
+          badge, re-fitted again. The receivers' <b>0.095</b> is above the ninetieth percentile at tight end, so on our numbers it
+          would flag almost nobody. At <b>0.065</b> over at least <b>200 routes</b> it catches 71 of 395 qualifying seasons, worth
+          <b>8.0 points a game the next season against 4.2</b>, with <b>28.2%</b> reaching 10+ against 3.7%. Like the receivers'
+          version it's a badge and not a factor, and for the same reason: nearly all of the edge sits at the top — among tight ends
+          already scoring 5–8 points a game it's worth <b>+0.07</b>, and only above 11 does it become worth <b>+2.97</b>.</div>
+        <div class="ovh">Where he sits in the room</div><div>Same blend as the receiver board: <b>where the team lists him in
+          August</b> against <b>where he actually ranked in routes last year</b>, leaning on last year in proportion to how much of
+          it he played, and only <b>15%</b> if he changed teams. Depth is read three deep here rather than four — the fourth tight
+          end on a roster runs <b>19%</b> of the routes for a <b>3.5%</b> target share, which is not a fantasy player in any
+          format.</div>
+        <div class="ovh">Career window</div><div><span class="fl g">Career window</span> means <b>years three to seven</b>, two
+          years longer than the receivers'. This was measured rather than assumed: a tight end's own year-over-year change in points
+          per game is still flat in years six (<b>-0.05</b>) and seven (<b>-0.18</b>) and doesn't properly turn until year eight
+          (<b>-0.89</b>), and the two highest top-12-finish rates on the whole table are years six and seven at <b>16.4%</b> and
+          <b>15.5%</b>. Docking a sixth-year tight end the way the receiver board does would have been backwards.</div>
+        <div class="ovh">No crowded-room flag — on purpose</div><div>The receiver board flags crowded rooms. This one doesn't,
+          because the effect isn't there. Over <b>254</b> starting-tight-end seasons, how many routes the second tight end ran has
+          essentially <b>no relationship</b> to what the first one scored (<b>r=+0.004</b>), and the starters actually averaged
+          <em>more</em> when the man behind them played a lot. A two-tight-end offence is usually a team that likes throwing to
+          tight ends.</div>
+        <div class="ovh">What's missing</div><div><b>Route share is estimated</b>, not charted — and that proxy is shakier here
+          than at receiver, because a tight end can be on the field all day as a blocker and the box score never says so. There's
+          also <b>no 2025 draft-price data</b> on any platform, so the ADP fit skips that year entirely.</div>
+      </div>
       <div class="ov" data-pos="WR">
         <div class="ovh">ADP is the backbone</div><div>Start from the <b>Market</b> column — that's the neutral anchor. Set
           <b>&ldquo;Drafting on&rdquo;</b> to your platform to see who your platform prices as a value or reach <em>versus that market</em>.</div>
@@ -851,6 +931,14 @@ _TEMPLATE = r"""<!DOCTYPE html>
       running-back model — but a rookie has no NFL games to measure, so his row leans heavily on where he was drafted and on
       Mike Clay's projection, and is flagged as such. And a receiver who <strong>changed teams</strong> has his team-based
       factors pulled toward neutral, because his new target share is a guess.</p>
+      <p data-pos="TE">Everything on the receiver list applies here, and one thing applies harder. <strong>Route share is
+      estimated from snap share</strong>, and at tight end that proxy is at its weakest: a blocking tight end can play every
+      snap of a game and never be a candidate to catch anything, and nothing in free data separates him from a receiving tight
+      end who played the same snaps. Read a high route share on a low-target player as a warning that the estimate is doing
+      badly, not as a hidden opportunity. Beyond that: <strong>rookies are on the board</strong> but lean on draft position and
+      Mike Clay's projection rather than on NFL games, a tight end who <strong>changed teams</strong> has his team factors pulled
+      toward neutral, and <strong>replacement level is the 12th tight end</strong> — one starter per team, no flex share — which
+      is the standard setting for a league like yours and is worth knowing if you play in one that starts more.</p>
     </div>
   </section>
 
@@ -1059,22 +1147,34 @@ function sumW(){return GROUPS.reduce((a,g)=>a+(weights[g]||0),0)||1;}
 function composite(q){const s=sumW();return GROUPS.reduce((a,g)=>a+(weights[g]||0)*(q.indices[g]??50),0)/s;}
 /* Index score -> points per game. A straight line when there are no bends;
    otherwise the bent scale calibration.py fitted, straight between each pair of
-   bends. Past either end it keeps going at that end's slope rather than
-   flattening off, so an unusually high or low score still moves the number.
+   bends. Past either end it keeps going rather than flattening off, so an
+   unusually high or low score still moves the number.
    This has to stay identical to apply() in src/calibration.py -- there is a
-   test that projects the same board both ways and compares.
+   test that projects the same board both ways and compares. In particular the
+   TOP end is damped there and has to be damped here: above the last bend there
+   is nobody, and the slope up there was read off the two thinnest, luckiest
+   points in the fit while also being the steepest slope on the curve. Run it out
+   unchecked and the top three backs walk away from RB4 by six points -- a step
+   no real season has produced (median RB3->RB4 since 2018 is 0.6, largest 2.3).
+   So past the top bend the slope is the average across the top third of the
+   bends rather than the final pair, halved. Still monotone: nobody reorders,
+   the top of the board just stops running away from the rest of it.
 
    Takes its scale as arguments rather than reading the page globals, because the
    Big Board has to price a quarterback and a running back in the same pass and
    each position was fitted its own bend. ptsAt() below is this function pointed
    at whichever board you're looking at. */
+const HI_DAMP=0.5;
 function ptsAtK(c,kn,a,b){
   const n=kn.length;
   if(n<2) return Math.max(0, a + b*c);
   if(c<=kn[0][0]){const s=(kn[1][1]-kn[0][1])/(kn[1][0]-kn[0][0]);
                   return Math.max(0, kn[0][1]+s*(c-kn[0][0]));}
-  if(c>=kn[n-1][0]){const s=(kn[n-1][1]-kn[n-2][1])/(kn[n-1][0]-kn[n-2][0]);
-                    return Math.max(0, kn[n-1][1]+s*(c-kn[n-1][0]));}
+  if(c>=kn[n-1][0]){
+    const j=Math.max(0, n-Math.max(2, Math.floor(n/3)));
+    let s=(kn[n-1][0]>kn[j][0])?(kn[n-1][1]-kn[j][1])/(kn[n-1][0]-kn[j][0]):0;
+    if(!isFinite(s)||s<=0) s=(kn[n-1][1]-kn[n-2][1])/(kn[n-1][0]-kn[n-2][0]);
+    return Math.max(0, kn[n-1][1]+s*HI_DAMP*(c-kn[n-1][0]));}
   let i=1; while(i<n-1 && kn[i][0]<c) i++;
   const x0=kn[i-1][0], y0=kn[i-1][1], x1=kn[i][0], y1=kn[i][1];
   return Math.max(0, y0+(y1-y0)*(c-x0)/(x1-x0));
@@ -1646,7 +1746,15 @@ function pickOf(x){
   return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;
 }
 const viaHas=(x,re)=>(x.lw_gate_via||[]).some(s=>re.test(s));
-const wrf=x=>x.wr_flags||{};
+/* One reader for both receiving boards. The tight-end payload writes its chips
+   under te_flags rather than wr_flags so the two can never be confused upstream,
+   but the KEYS INSIDE are deliberately identical — gate75, fd_badge, prime,
+   crowded — so everything downstream of this line stays position-blind. Note
+   that gate75 on a tight end means the 65% gate, not 75%: the name is wire
+   format, the threshold lives in the model. The tight-end board never sets
+   crowded (a second tight end in the room turned out not to cost the first one
+   anything, r=+0.004 on route share), so no TE option reads it. */
+const wrf=x=>x.wr_flags||x.te_flags||{};
 
 /* Everything the filter needs, per position, in one table: the label on the
    control, the options it offers, the rule each option applies, the sentence
@@ -1715,6 +1823,43 @@ const LWDEF={
          both:  ()=>"Below the line — clear at most one of the two screens",
          window:()=>"Below the line — first or second year, or year six and beyond",
          crowded:()=>"Below the line — not in one of the six rooms",
+         miss:  ()=>"Below the line — clear at least one screen, or aren't measured on both"}},
+
+  /* The tight-end screens. Same two ideas as the receivers', re-fitted, because
+     the same thresholds would have caught almost nobody — three quarters of the
+     routes is a bar the median tight end misses by twenty points, and a 9.5%
+     first-down rate is above the ninetieth percentile here. So the gate is 65%
+     and the badge is 6.5%, both picked off our own eight seasons.
+
+     There is no crowded-room option, and its absence is a finding rather than an
+     omission. A tight end's scoring barely moves with how much work the man
+     behind him gets (r=+0.004 against the TE2's route share over 254 seasons),
+     so there is nothing to screen for. The receivers' board keeps its version
+     because the market prices crowding there; here the market doesn't either.
+
+     The career window runs later too — years three to seven rather than three to
+     five. Tight ends don't fall off until year eight. */
+  TE:{label:"Screen",
+    opts:[["all","All TEs"],
+          ["gate","Runs 65%+ of the routes"],
+          ["fd","Moves the chains (1D per route)"],
+          ["both","Clears both screens"],
+          ["window","In the career window (yrs 3–7)"],
+          ["miss","Clears neither screen"]],
+    match:{gate:  x=>wrf(x).gate75===true,
+           fd:    x=>wrf(x).fd_badge===true,
+           both:  x=>wrf(x).gate75===true&&wrf(x).fd_badge===true,
+           window:x=>wrf(x).prime===true,
+           miss:  x=>x.route_share!=null&&wrf(x).gate75===false&&wrf(x).fd_badge===false},
+    note:{gate:  ()=>"run a route on 65%+ of their team's dropbacks, which was worth 7.0 points a game the following season against 3.5 — and 20.7% of them went on to a 10-point season against 1.3% of the rest",
+          fd:    ()=>"earn a first down on 6.5%+ of their routes, over at least 200 routes — worth 8.0 points a game next season against 4.2, and 28.2% reached 10 points a game against 3.7%",
+          both:  ()=>"clear the route gate AND the first-down badge",
+          window:()=>"are in years three to seven, which is where tight end production holds up — the drop doesn't arrive until year eight",
+          miss:  ()=>"were measured on both screens and cleared neither"},
+    sep:{gate:  ()=>"Below the line — under 65% of the routes, or no measured route share",
+         fd:    ()=>"Below the line — under a 0.065 first-down rate, or under 200 routes to judge it on",
+         both:  ()=>"Below the line — clear at most one of the two screens",
+         window:()=>"Below the line — first or second year, or year eight and beyond",
          miss:  ()=>"Below the line — clear at least one screen, or aren't measured on both"}},
 };
 function lwDef(){return LWDEF[POS]||null;}
