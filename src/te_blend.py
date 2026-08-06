@@ -64,13 +64,19 @@ NO SPREAD FACTOR, for the same reason as the other boards -- implied total IS
 (total line + spread) / 2. Adding spread on top of it moves R-squared 0.0296 to
 0.0296 and leaves a coefficient of +0.001.
 
-CROWDED ROOMS DO NOT EXIST AT THIS POSITION, SO NOTHING IS FLAGGED. The
-receivers' board names five crowded offences without deducting anything. I ran
-the equivalent test here and there is nothing to name: across 254 TE1 seasons,
-the TE1's points per game correlates +0.004 with the second tight end's route
-share. TE1s average 7.83 points a game when the TE2 runs 15-30% of routes, 6.98
-when the TE2 runs more than half. A blocking tight end is not competition. The
-constant stays in the file as an empty set so nothing downstream has to change.
+A CROWDED ROOM MEANS THE RECEIVERS, AND THIS FILE HAD THE WRONG ROOM. It used
+to say crowding does not exist at tight end, on the strength of a real test:
+across 254 TE1 seasons the TE1's points per game correlates +0.004 with the
+SECOND TIGHT END's route share, and TE1s average 7.83 points a game when the
+backup runs 15-30% of routes against 6.98 when he runs more than half. That
+finding is correct and it still stands -- a blocking tight end is not
+competition. It was simply not Heath's claim. His is about wide receivers, and
+that test had never been run here. Run now, on 712 tight end seasons: the top
+two receivers' combined target share going into a year correlates -0.0882 with
+what the tight end then scores, and among the 419 who entered off a ten-game
+season the ones behind a thin receiver room (top two under 34%) post a median
+4.88 points a game against 3.87 and 3.91 for the rest. See ROOM_CROWD, which
+puts it into Situation, and CROWDED_TEAMS, which now names six offences.
 
 THE CAREER WINDOW OPENS LATER AND STAYS OPEN LONGER. Within-player change in
 points per game entering each season: year 2 +0.40, year 3 +0.29, year 4 +0.28,
@@ -108,6 +114,7 @@ import numpy as np
 import pandas as pd
 
 from . import availability, calibration, config, rankings, scoring  # noqa: F401
+from . import team_budget
 
 # ---------------------------------------------------------------------------
 # CONSTANTS -- every one of these is a decision, so each says what it decides
@@ -147,6 +154,19 @@ K_CAREER = 14.0
 # 0.748 against 0.740 at 12+ and 0.729 at 14+, so demanding twelve throws away
 # rows without buying accuracy.
 HEALTHY_GAMES = 10
+
+# HOW MUCH OF A SEASON HAS TO BE THERE BEFORE ITS RATES ARE BELIEVED.
+#
+# HEALTHY_GAMES above is still the honest reading of the evidence -- 7-9 game
+# seasons predict at 0.539 against 0.710 for 10-12, and that IS a step. What was
+# wrong was spending it as a turnstile: keep the season whole or throw it away
+# whole. These turn the same evidence into a weight. The floor sits at 0.15 and
+# the top at 14 games, so 9 games lands at 0.50 and 10 at 0.60 -- a ratio of
+# trust that tracks the measured 0.539/0.710 rather than flipping between all
+# and nothing on one game. _bundle() is the only reader.
+CRED_GAMES_LO, CRED_GAMES_HI = 4.0, 14.0
+CRED_MIN = 0.15
+CRED_MIN_GAMES = 2
 
 # How many seasons back the model will look. Four, and now measured rather than
 # inherited. Each prior season on its own predicts at 0.741 (one year back),
@@ -232,6 +252,199 @@ TAPE_W_MAX, TAPE_W_MIN = 0.75, 0.30
 TAPE_GAMES_HI, TAPE_GAMES_LO = 17.0, 9.0
 TAPE_W_MOVED = 0.15
 
+# AN INJURY IS NOT A REASON TO STOP BELIEVING THE TAPE.
+#
+# The ramp above asks one question -- how much of LAST season did we watch him
+# in this role -- and that question punishes exactly the wrong player. Brock
+# Bowers played 17 games in 2024 and took 25.8% of his team's targets. He played
+# 12 in 2025, hurt, and took 23.6% of them. The same role, twice, measured over
+# 29 games. On last season's games alone the ramp reads 12 and believes him
+# 0.469, so nearly half of his job comes back from a league-average table that
+# says a TE1 gets 14.7% -- and the model quietly prices the best young tight end
+# in football as three-quarters of himself because he missed five weeks.
+#
+# That is the same mistake the receivers' board made with CeeDee Lamb, and it
+# gets the same answer: widen the window. `prev_games3` is the mean games over
+# the recent seasons and is already on every row. Taking the larger of the two
+# means a healthy player is unaffected (his two numbers agree), a player with one
+# lost season is judged on the seasons around it, and a player who has been
+# unavailable for years still gets discounted, because then BOTH numbers are low.
+#
+# What this does NOT do is excuse him on availability. How many games he plays
+# next year is priced separately, in Availability, off dur3 -- and there the
+# missed time still counts against him, as it should. This dial is only about
+# whether we believe what we saw when he was on the field.
+TAPE_WINDOW = True
+
+# HOW CENTRAL HE IS TO HIS OWN OFFENCE, NOT HOW CENTRAL HIS SPOT USUALLY IS.
+#
+# The two tables above are league averages keyed on a rank. Every TE1 in the
+# league reads 0.147 of his team's targets, whether he is Brock Bowers at 0.241
+# or a blocking specialist at 0.09. That number is 35% of the Volume factor and
+# all of Role, so the model has been pricing the job title and never the job.
+#
+# Measured against the season each player actually went on to have, over 712
+# tight end seasons: his own target share scores +0.676, the slot table scores
+# +0.495. The measurement is better information, so where it exists it should be
+# most of the answer -- believed on exactly the same terms as the depth slot
+# above, tape_w, so a player who missed half of last year keeps leaning on the
+# table and a player who changed teams almost entirely does.
+#
+#   1.0  measured share is worth its full tape_w
+#   0.0  off -- league-average table only, the behaviour before this
+ROLE_TAPE = 1.0
+
+# WHAT A TIGHT END'S JOB IS WORTH DEPENDS ON WHOSE OFFENCE HE IS IN.
+#
+# ROLE_TAPE above fixed half of a problem. Where a player has tape, his own
+# measured share now carries most of his job. But the other half of every one of
+# those blends -- and the whole of it for a rookie, a mover, or anyone who missed
+# time -- is still SLOT_TGT_SHARE, and that table is one number per depth rank
+# for the entire league. It says a TE1 is worth 14.7% of his team's targets in
+# Arizona and 14.7% in Denver.
+#
+# Those two offences are not the same offence. Measured on all 256 team-seasons
+# from 2018-2025, the share of a team's targets that goes to the tight end
+# position:
+#
+#   median 0.207   p10 0.145   p90 0.289   min 0.078   max 0.439
+#
+# A three-fold spread, and it is a property of the offence rather than noise. Its
+# year-to-year correlation with itself is +0.465 on targets and +0.478 on yards,
+# against +0.445 for pass rate and +0.241 for plays per game -- the two team
+# terms this file already trusts enough to put in Situation.
+#
+# It also predicts. Against what a tight end actually went on to score the
+# following season, over 712 seasons, using only what was knowable going in:
+#
+#   the offence's tight end appetite   +0.1319   (+0.1675 among 8+ game players)
+#   plays per game                     +0.0262
+#   pass rate                          -0.0160
+#   crowded receiver room              -0.0860   (used inverted, so +0.0860)
+#
+# So this is the strongest team-level signal available at the position, and two
+# of the three the model already reads are worth nothing at all.
+#
+# THIS IS A CHANGE OF DEFINITION, NOT OF WEIGHT. Nothing in DEFAULT_WEIGHTS
+# moves. The job prior stays exactly where it was and stays worth exactly what it
+# was worth -- it is what the prior MEASURES that changes, from "what the average
+# TE1 gets" to "what a TE1 gets in this offence". The multiplier is the team's
+# own appetite over the league's, so a league-average offence multiplies by 1.0
+# and nothing about it moves at all.
+#
+# Read over FIT_SEASONS prior seasons, weighted toward the most recent, and
+# always STRICTLY BEHIND the season being predicted, so the backtest is being
+# tested rather than told the answer. Coaching staffs turn over and the multi-year
+# window is the only defence against that -- a new coordinator can rebuild an
+# offence's appetite in one year and this will take two to notice.
+#
+#   0.0  off -- the league table, the behaviour before this
+#   1.0  the offence's own appetite, at full strength
+#
+# ---------------------------------------------------------------------------
+# IT IS OFF, AND IT IS OFF BECAUSE IT WAS MEASURED, NOT BECAUSE IT WAS DROPPED.
+#
+# Everything above is true and it still does not make the board better. Swept
+# FIT_LAM over 0/.25/.5/.75/1, both bases, budget on and off, on the same 712
+# seasons. Nothing helped and the drift was against:
+#
+#   composite rho   0.6931 shipped -> 0.6931 best variant -> 0.6906 worst
+#   backtest MAE    1.87   shipped -> 1.88-1.90 every variant, none better
+#
+# Split by how much tape the row had, it does not help the thin-tape rows either
+# (0.4935 -> 0.4937, n=416), which is where a job prior does nearly all its work
+# and where it had to show up if it was going to show up anywhere.
+#
+# THE REASON IS THE INTERESTING PART, AND IT IS WORTH NOT RELEARNING.
+#
+# 1. The model already has it. A player's own target share was measured INSIDE
+#    his offence, so it is the same fact. On the residual after his own share,
+#    the appetite is worth +0.0358 -- and the crowded-room term already in
+#    Situation is worth +0.0573 on that same leftover.
+#
+# 2. The multiplier is constant within a roster, so it cannot reorder a team. It
+#    only reorders across teams, and two thirds of the test set are TE2s and TE3s
+#    who score nothing wherever they play.
+#
+# 3. For the one crowd whose own tape really is quoted in the wrong currency --
+#    the 194 who changed teams -- rebasing their share from the old offence to
+#    the new one made them WORSE, +0.6327 to +0.5384 (+0.6555 to +0.4968 among
+#    the 123 with a real prior season). And the new offence's appetite predicts
+#    a mover's next season at MINUS 0.2039 (-0.2627 among the real ones).
+#
+#    That negative sign is not noise, it is selection. Nobody signs a tight end
+#    to a team that already feeds the position unless he is the insurance behind
+#    someone; the men who move into tight-end-hostile offences are the ones being
+#    brought in to be the answer. Which job you are walking into is not what the
+#    previous regime did with the position.
+#
+# So the appetite is a real property of an offence and a useless one for pricing
+# a particular tight end in it. Leave this off. The machinery stays because the
+# measurement cost something and the next person to have this idea should be able
+# to read why it does not work rather than rebuild it to find out.
+TEAM_FIT = False
+FIT_SEASONS = 3
+FIT_DECAY = 0.75          # weight on each season further back
+FIT_LAM = 0.75            # how much of the measured gap to apply; set by A/B
+FIT_LO, FIT_HI = 0.65, 1.55   # a multiplier outside this band is a data problem
+FIT_BASIS = "lead"        # "lead" = what the OFFENCE gives its top tight end,
+                          # "room" = what it gives the position in total. The
+                          # table this multiplies is per-slot, so "lead" is the
+                          # like-for-like quantity; "room" mixes in how many
+                          # bodies share the work, which ROOM_CROWD already prices.
+FIT_MIN_G = 6             # games before a tight end can stand for his offence
+FIT_BUDGET = True         # also move the team budget, not just the prior. Off,
+                          # the budget in 3c snaps every roster back onto the
+                          # league median and undoes most of 3a. On, a player
+                          # with a lot of tape gets the offence applied to his
+                          # own measured share too, which may be double-counting.
+
+# TOP-DOWN: DOES THIS ROSTER ADD UP TO ONE TEAM?
+#
+# Every share above is a bottom-up read of one player. Nothing checked the sum
+# until a reconciliation pass measured it, and the sums were wrong -- badly on
+# some rosters. src/team_budget.py holds the measured ceilings and the whole
+# argument. Set False to switch the correction off; it is a straight A/B.
+TEAM_BUDGET = True
+
+# How hard to pull. 1.0 snaps the roster onto the budget; lower leaves room
+# for a genuinely concentrated offence. Set from the A/B, per board.
+# Swept 0 -> 1 on 712 tight end seasons: 0.6881 off, 0.6896, 0.6905, 0.6908,
+# 0.6908, 0.6912, then 0.6867 at a full pull -- it falls off a cliff at 1.0,
+# and role_tgt with it (+0.6502 here against +0.5929 there). A tight end room's
+# share of a passing game genuinely varies by offence in a way a receiver room's
+# does not, so half the gap is drift and half is a real Kansas City. Half pull.
+BUDGET_LAM = 0.5
+
+# A CROWDED RECEIVER ROOM, WHICH THIS FILE USED TO SAY DID NOT EXIST.
+#
+# The note below at CROWDED_TEAMS tested whether the SECOND TIGHT END is
+# competition. He is not, and that finding stands. But it was never Heath's
+# claim. His is about wide receivers -- fourteen of his fifteen league-winning
+# tight ends came from offences that did not have multiple other pass-catchers
+# drafted inside the top sixty -- and nobody had run that test here.
+#
+# Run now, on 712 tight end seasons, against the NEXT season's points per game,
+# using what the room looked like going in:
+#
+#   top two receivers' combined target share   rho -0.0882
+#   the single biggest receiver's share        rho -0.0664
+#   how many receivers cleared 20%             rho -0.0723
+#
+# And by band, among the 419 tight ends who entered a season having played ten
+# or more games the year before:
+#
+#   thin room   top two under 34%    n=130   median 4.88 ppg
+#   average     34-42%               n=175   median 3.87
+#   crowded     over 42%             n=114   median 3.91
+#
+# A point a game between the thin rooms and the rest, which at a position where
+# the twelfth-best tight end scores 7.8 is not a rounding error. It is a weak
+# signal per player and a real one in aggregate, so it goes in where a weak real
+# signal belongs -- as a third of Situation, the four-point factor -- rather than
+# as a factor of its own. Set False to switch it off; it is a straight A/B.
+ROOM_CROWD = True
+
 # ---------------------------------------------------------------------------
 # THE TWO SCREENS FROM HEATH'S RESEARCH
 # ---------------------------------------------------------------------------
@@ -278,24 +491,65 @@ ROUTE_GATE = 0.65
 # 8-11 band, +2.97 above 11), so weighting the whole board on it would be reading
 # a top-of-market signal into the last two rounds.
 FD_RR_BADGE = 0.065
+
+# THE TARGET FLOOR HOLDS. THE ROOKIE EXEMPTION DOES NOT.
+#
+# Heath's league-winning tight ends averaged 8.0 targets a game and none was
+# under 6.0; the year before, 7.7 and none under 5.4. Tested here on the same
+# 712 seasons, against the chance of a genuine top-six year (11+ points a game):
+#
+#     prior targets/game under 4.0    n=537    0.74%
+#     4.0 - 5.4                       n= 84    1.19%
+#     5.4 - 6.0                       n= 37   10.81%
+#     6.0 and up                      n= 54   29.63%
+#
+# The step lands exactly on his 5.4, which is about as clean a replication as
+# this kind of screen ever gets, and Volume is already the heaviest factor on the
+# board because of it.
+#
+# His third claim is that years one and two are exempt from all of that -- a
+# young tight end with thin usage is still allowed to break out. IT DOES NOT
+# REPLICATE HERE. Among tight ends entering a season off under 6.0 targets a
+# game:
+#
+#     year 1-2   n= 97   median 2.37 ppg   P(11+) 1.03%
+#     year 3-4   n=234   median 2.40       P(11+) 1.71%
+#     year 5+    n=327   median 2.85       P(11+) 1.22%
+#
+# Youth buys nothing. A thin rookie year is as bad a sign as a thin fifth year,
+# so nothing in this file waives the usage evidence for young players. What they
+# do get is WINDOW_SCORES, which is an age curve rather than an exemption, and
+# draft capital inside Talent while it still carries information. Those are
+# priced. An exemption is not, because the data does not support one.
 FD_RR_MIN_ROUTES = 200
 
 # ---------------------------------------------------------------------------
-# CROWDED ROOMS -- MEASURED, AND THERE IS NOTHING THERE
+# CROWDED ROOMS -- THE RIGHT ROOM, MEASURED
 # ---------------------------------------------------------------------------
-# The receivers' board names five crowded offences and deducts nothing, on the
-# grounds that the crowding claim is about ADP rather than production. At tight
-# end there is not even that much to say. Across 254 TE1 seasons, the TE1's
-# points per game correlates +0.004 with the second tight end's route share and
-# -0.177 with the second tight end's target share -- and by band, the TE1
-# averages 7.83 points a game when his backup runs 15-30% of routes, 6.69 at
-# 30-50%, and 6.98 above half. There is no monotone effect to model, and the
-# reason is obvious once stated: the second tight end is usually on the field to
-# block, and a blocking tight end is not competition for targets.
+# THIS BLOCK USED TO SAY THE SET WAS EMPTY AND THAT NOTHING BELONGED IN IT. What
+# it had measured was the SECOND TIGHT END, and that measurement was sound:
+# across 254 TE1 seasons the TE1's points per game correlates +0.004 with the
+# TE2's route share, and by band he averages 7.83 points a game when his backup
+# runs 15-30% of routes, 6.69 at 30-50% and 6.98 above half. No monotone effect,
+# for an obvious reason -- the second tight end is usually on the field to block,
+# and a blocking tight end is not competition for targets. All still true.
 #
-# The name stays so that _row_flags and the site do not have to change shape.
-# The set is empty because the honest answer is that nothing belongs in it.
-CROWDED_TEAMS: set[str] = set()
+# It was the wrong room. Heath's crowding is about WIDE receivers: fourteen of
+# his fifteen league-winning tight ends came from offences without multiple other
+# pass-catchers drafted inside the top sixty. Measured here on 712 seasons, the
+# top two receivers' combined target share going into a year correlates -0.0882
+# with what the tight end scores in it. ROOM_CROWD carries that into Situation.
+#
+# These six are the 2026 offences whose top two receivers took more than 42% of
+# the targets in 2025 -- the same bar as the band test, where over-42 rooms leave
+# a median 3.91 points a game against 4.88 behind a thin one:
+#
+#   SEA .512   PHI .504   DET .498   LA/LAR .482   MIN .470   CIN .465
+#
+# Both Rams abbreviations are listed because the source files disagree on which
+# one they use. The flag is display only -- the deduction, such as it is, is the
+# continuous term in Situation, not this set.
+CROWDED_TEAMS: set[str] = {"SEA", "PHI", "DET", "LA", "LAR", "MIN", "CIN"}
 
 # ---------------------------------------------------------------------------
 # THE CAREER WINDOW
@@ -474,6 +728,8 @@ __all__ = [
     "ROUTE_GATE",
     "FD_RR_BADGE",
     "CROWDED_TEAMS",
+    "ROOM_CROWD",
+    "TEAM_FIT",
     "season_aggregates",
     "entering_profiles",
     "attach_role_window",
@@ -742,6 +998,44 @@ def season_aggregates(weekly: pd.DataFrame, scoring_rules: dict | None,
                 .agg(t_tgt=("targets", "sum"), t_gm=("week", "nunique")))
     team_tgt["team_tgt_pg"] = team_tgt["t_tgt"] / team_tgt["t_gm"].replace(0, np.nan)
 
+    # ---- how big the RECEIVERS are, counted the same way -------------------
+    # Heath's crowding claim is about the wide receivers, not the second tight
+    # end, and it has to be measured before the position filter throws them
+    # away. Top two by season-long share, because that is the shape of the
+    # claim: one alpha the tight end can live beside, two and he is third in
+    # line. See ROOM_CROWD for what the number does and what it is worth.
+    _wr = _all[_all["position"] == "WR"]
+    if not _wr.empty:
+        _ws = (_wr.groupby(["season", "team", "player_id"], as_index=False)
+               .agg(tgt=("targets", "sum")))
+        _ws = _ws.merge(team_tgt[["season", "team", "t_tgt"]], on=["season", "team"],
+                        how="left")
+        _ws["ts"] = _ws["tgt"] / _ws["t_tgt"].replace(0, np.nan)
+        _ws = _ws.sort_values(["season", "team", "ts"], ascending=[True, True, False])
+        _ws["idx"] = _ws.groupby(["season", "team"]).cumcount() + 1
+        _room = (_ws[_ws["idx"] <= 2].groupby(["season", "team"], as_index=False)["ts"]
+                 .sum().rename(columns={"ts": "wr_room_share"}))
+        team_tgt = team_tgt.merge(_room, on=["season", "team"], how="left")
+    else:
+        team_tgt["wr_room_share"] = np.nan
+
+    # ---- how much of the passing game this offence gives the POSITION -------
+    # Counted here for the same reason the receivers are: after the filter below
+    # there is no way to see what the rest of the offence got. This is the whole
+    # tight end room against every target the team threw, which is the quantity
+    # SLOT_TGT_SHARE is a league average of. See TEAM_FIT.
+    _te = _all[_all["position"] == "TE"]
+    if not _te.empty:
+        _ts = (_te.groupby(["season", "team"], as_index=False)
+               .agg(e_tgt=("targets", "sum")))
+        _ts = _ts.merge(team_tgt[["season", "team", "t_tgt"]],
+                        on=["season", "team"], how="left")
+        _ts["te_room_share"] = _ts["e_tgt"] / _ts["t_tgt"].replace(0, np.nan)
+        team_tgt = team_tgt.merge(_ts[["season", "team", "te_room_share"]],
+                                  on=["season", "team"], how="left")
+    else:
+        team_tgt["te_room_share"] = np.nan
+
     w = w[(w["position"] == "TE") & (w["season_type"].str.upper() == "REG")].copy()
     w = w[w["season"].notna()]
 
@@ -790,8 +1084,9 @@ def season_aggregates(weekly: pd.DataFrame, scoring_rules: dict | None,
               ["player_id", "season", "player_name"]])
     sa = sa.merge(tm, on=["player_id", "season"], how="left")
     sa = sa.merge(nm, on=["player_id", "season"], how="left")
-    sa = sa.merge(team_tgt[["season", "team", "team_tgt_pg"]],
-                  on=["season", "team"], how="left")
+    sa = sa.merge(
+        team_tgt[["season", "team", "team_tgt_pg", "wr_room_share",
+                  "te_room_share"]], on=["season", "team"], how="left")
 
     g = sa["games"].replace(0, np.nan)
 
@@ -960,9 +1255,43 @@ def _bundle(pdf: pd.DataFrame, as_of) -> dict | None:
     hist = pdf[(pdf["season"] < as_of) & (pdf["season"] >= as_of - RECENCY)]
     if hist.empty:
         return None
-    healthy = hist[hist["games"] >= HEALTHY_GAMES]
-    use = (healthy if not healthy.empty else hist).sort_values("season", ascending=False).head(3)
-    wts = np.array([0.6, 0.27, 0.13][:len(use)], dtype="float64")
+
+    # A PARTIAL SEASON IS EVIDENCE, JUST WEAKER EVIDENCE.
+    #
+    # This used to be a turnstile: seasons at HEALTHY_GAMES or more were kept and
+    # everything else was thrown out whole, if he had any healthy season at all.
+    # That put a cliff in the middle of exactly the players it matters for. Brock
+    # Bowers played twelve games in 2025 with a knee, so his compromised rate
+    # cleared the bar and came in at full weight; had he played nine, the same
+    # season would have counted for nothing. Neither is right, and the direction
+    # of the error flips on one game either side of the line.
+    #
+    # So: keep every season in the window, and weight it by how much of it there
+    # is. Same shape as the depth-slot ramp -- a real number that moves, not a
+    # gate -- which is what fixed the receivers' version of this.
+    #
+    #    played 14+   full weight        a season, and we watched it
+    #    played 12    0.80               most of a season
+    #    played 10    0.60               half a story
+    #    played 6     0.20               a hamstring, mostly
+    #    played 4-    0.15 floor         still not zero: he did play
+    #
+    # It never reaches zero on purpose. Discarding a hurt season entirely is the
+    # same mistake as trusting it entirely, just pointing the other way.
+    # A one-game cameo is noise rather than a season, and it would otherwise take
+    # up one of the three slots below. `hist` itself is left alone -- prev_games,
+    # career_games and durability all still read every appearance.
+    rate_pool = hist[pd.to_numeric(hist["games"], errors="coerce").fillna(0)
+                     >= CRED_MIN_GAMES]
+    if rate_pool.empty:
+        rate_pool = hist
+    use = rate_pool.sort_values("season", ascending=False).head(3)
+    g = pd.to_numeric(use["games"], errors="coerce").fillna(0.0)
+    cred = ((g - CRED_GAMES_LO) / (CRED_GAMES_HI - CRED_GAMES_LO)).clip(CRED_MIN, 1.0)
+    wts = (np.array([0.6, 0.27, 0.13][:len(use)], dtype="float64")
+           * cred.to_numpy(dtype="float64"))
+    if not np.isfinite(wts).any() or wts.sum() <= 0:
+        wts = np.array([0.6, 0.27, 0.13][:len(use)], dtype="float64")
     wts = wts / wts.sum()
 
     def wavg(col):
@@ -1040,11 +1369,104 @@ def _merge_team_env(prof: pd.DataFrame, team_season: pd.DataFrame | None) -> pd.
     return out.drop(columns=[c for c in out.columns if c.endswith("_ts")])
 
 
+def _room_map(sa: pd.DataFrame) -> dict:
+    """(season, team) -> what the top two receivers took that year.
+
+    Read one season BEHIND the row that uses it, so this is entering
+    information and not a look at the year being predicted.
+    """
+    if sa is None or sa.empty or "wr_room_share" not in sa.columns:
+        return {}
+    d = sa.dropna(subset=["team", "wr_room_share"])
+    g = d.groupby(["season", "team"])["wr_room_share"].max()
+    return {(int(s), t): float(v) for (s, t), v in g.items() if pd.notna(v)}
+
+
+def _fit_map(sa: pd.DataFrame) -> dict:
+    """(season, team) -> how tight-end-friendly that offence is, entering it.
+
+    The team's own share of targets to the position over the FIT_SEASONS seasons
+    BEFORE the key season, divided by what the league did over the same window.
+    1.0 is a league-average offence. See TEAM_FIT.
+
+    Every season read is strictly behind the season keyed, so a row built for
+    2026 sees 2023-2025 and a backtest row built for 2024 sees 2021-2023. There
+    is no path by which this can see the year it is being asked about.
+    """
+    if sa is None or sa.empty:
+        return {}
+    if FIT_BASIS == "lead":
+        # What the offence gives its LEAD tight end, which is the quantity
+        # SLOT_TGT_SHARE[1] is a league average of. The room total is a
+        # different question -- a team can hand the position a quarter of its
+        # targets and split them two ways, and boosting a TE1's prior off that
+        # is pricing a job nobody holds.
+        if "target_share" not in sa.columns:
+            return {}
+        d = sa.dropna(subset=["team", "target_share"])
+        if d.empty:
+            return {}
+        # target_share here is a per-game mean, so a tight end who caught four
+        # balls in his only appearance can post the highest number on the roster
+        # and then stand in for the whole offence. Require a real sample; fall
+        # back to the unfiltered pick only where nobody clears it.
+        big = d[pd.to_numeric(d.get("games"), errors="coerce").fillna(0)
+                >= FIT_MIN_G]
+        g = big.groupby(["season", "team"])["target_share"].max()
+        if len(g) < len(d.groupby(["season", "team"])):
+            allg = d.groupby(["season", "team"])["target_share"].max()
+            g = g.reindex(allg.index)
+            g = g.where(g.notna(), allg)
+    else:
+        if "te_room_share" not in sa.columns:
+            return {}
+        d = sa.dropna(subset=["team", "te_room_share"])
+        if d.empty:
+            return {}
+        g = d.groupby(["season", "team"])["te_room_share"].max()
+    by_season: dict[int, dict] = {}
+    for (s, t), v in g.items():
+        if pd.notna(v):
+            by_season.setdefault(int(s), {})[t] = float(v)
+    if not by_season:
+        return {}
+
+    seasons = sorted(by_season)
+    out = {}
+    for key in range(min(seasons) + 1, max(seasons) + 2):
+        window = [s for s in seasons if key - FIT_SEASONS <= s <= key - 1]
+        if not window:
+            continue
+        # most recent season heaviest -- a coordinator hired last year has had
+        # one season to change the offence and this should mostly reflect it
+        wts = {s: FIT_DECAY ** (key - 1 - s) for s in window}
+        allv = [(v, wts[s]) for s in window for v in by_season[s].values()]
+        base = float(np.average([v for v, _ in allv],
+                                weights=[w for _, w in allv])) if allv else np.nan
+        if not np.isfinite(base) or base <= 0:
+            continue
+        teams = {t for s in window for t in by_season[s]}
+        for t in teams:
+            pairs = [(by_season[s][t], wts[s]) for s in window if t in by_season[s]]
+            if not pairs:
+                continue
+            own = float(np.average([v for v, _ in pairs],
+                                   weights=[w for _, w in pairs]))
+            mult = own / base
+            # A partial window is thinner evidence, so it says less. One season
+            # of an offence is worth a third of the claim three seasons make.
+            cred = len(pairs) / float(FIT_SEASONS)
+            mult = 1.0 + FIT_LAM * cred * (mult - 1.0)
+            out[(key, t)] = float(np.clip(mult, FIT_LO, FIT_HI))
+    return out
+
+
 def entering_profiles(sa: pd.DataFrame, team_season, players, pool) -> pd.DataFrame:
     """One row per (tight end, completed season) -- what was knowable beforehand."""
     birth = _birth_map(players)
     wt = win_totals()
     fwd = implied_totals()
+    room = _room_map(sa)
     rows = []
     for pid, pdf in sa.groupby("player_id"):
         pdf = pdf.sort_values("season")
@@ -1069,6 +1491,7 @@ def entering_profiles(sa: pd.DataFrame, team_season, players, pool) -> pd.DataFr
                 "durability": b.get("dur3", np.nan),
                 "win_total": wt.get((season, team)),
                 "implied_fwd": fwd.get((season, team)),
+                "wr_room_share": room.get((season - 1, team)),
                 **b,
             })
     prof = pd.DataFrame(rows)
@@ -1187,6 +1610,9 @@ def attach_role_window(prof: pd.DataFrame, sa: pd.DataFrame, players) -> pd.Data
     # tape in proportion to how much of last season he actually played and
     # whether it was even for this team. See TAPE_W_MAX above.
     pg = pd.to_numeric(p.get("prev_games"), errors="coerce")
+    if TAPE_WINDOW:                              # see TAPE_WINDOW -- the Bowers case
+        pg = pd.concat([pg, pd.to_numeric(p.get("prev_games3"), errors="coerce")],
+                       axis=1).max(axis=1)
     ramp = ((pg - TAPE_GAMES_LO) / (TAPE_GAMES_HI - TAPE_GAMES_LO)).clip(0.0, 1.0)
     tape_w = TAPE_W_MIN + (TAPE_W_MAX - TAPE_W_MIN) * ramp
     if "mover" in p.columns:
@@ -1231,6 +1657,60 @@ def attach_role_window(prof: pd.DataFrame, sa: pd.DataFrame, players) -> pd.Data
         np.interp(slot_f, ks, [SLOT_ROUTE[int(k)] for k in ks]), index=p.index)
     p["slot_tgt_share"] = pd.Series(
         np.interp(slot_f, ks, [SLOT_TGT_SHARE[int(k)] for k in ks]), index=p.index)
+
+    # ---- 3a. whose offence is it -----------------------------------------
+    # See TEAM_FIT. The table above says every TE1 in the league is worth 14.7%
+    # of his team's targets. Arizona gives the position 34% of them and Denver
+    # 15%, and that difference is a standing property of the two offences rather
+    # than noise. So the prior a player regresses toward becomes his offence's
+    # prior instead of the league's. A league-average offence multiplies by 1.0.
+    #
+    # It applies BEFORE the tape blend below, because it is the prior that is
+    # wrong -- a player's own measured share was never league-average to begin
+    # with, and multiplying that would be counting the offence twice.
+    fit = pd.Series(1.0, index=p.index)
+    if TEAM_FIT:
+        fmap = _fit_map(sa)
+        if fmap:
+            fit = pd.Series(
+                [fmap.get((int(s), t), np.nan) if pd.notna(s) else np.nan
+                 for s, t in zip(p["season"], p["team"])], index=p.index)
+            fit = fit.fillna(1.0)
+            p["slot_tgt_share"] = p["slot_tgt_share"] * fit
+    p["team_fit"] = fit
+
+    # ---- 3b. what HIS job is worth, not what the average one is -----------
+    # See ROLE_TAPE above. The share he actually commanded, blended over the
+    # table on the same believe-the-tape weight the slot itself uses, so this is
+    # one dial rather than a second competing one. No leakage: target_share and
+    # route_share here are the recency-weighted read of seasons STRICTLY BEFORE
+    # the row's season, built by entering_profiles, so the backtest is testing
+    # the change rather than being told the answer.
+    if ROLE_TAPE > 0:
+        meas_ts = pd.to_numeric(p.get("target_share"), errors="coerce")
+        meas_rt = pd.to_numeric(p.get("route_share"), errors="coerce")
+        w_ts = (tape_w * ROLE_TAPE).clip(0.0, 1.0).where(meas_ts.notna(), 0.0)
+        w_rt = (tape_w * ROLE_TAPE).clip(0.0, 1.0).where(meas_rt.notna(), 0.0)
+        p["slot_tgt_share"] = ((1.0 - w_ts) * p["slot_tgt_share"]
+                               + w_ts * meas_ts.fillna(0.0))
+        p["slot_route"] = ((1.0 - w_rt) * p["slot_route"]
+                           + w_rt * meas_rt.fillna(0.0))
+        p["role_tape_w"] = w_ts
+
+    # ---- 3c. make the roster add up to one team ---------------------------
+    # See src/team_budget.py. Three tight ends were being handed 26% of a
+    # passing game when the real top-three take 20%. Within-team order is
+    # untouched; only the level moves, and only where it was wrong. The cut is
+    # taken from whichever tight ends on the roster we are guessing about -- see
+    # CREDIT_WEIGHTED, which is what stops a measured alpha paying for his
+    # backups' table estimate.
+    if TEAM_BUDGET:
+        p["slot_tgt_share"] = team_budget.scale(
+            p, "slot_tgt_share", team_budget.TE_TGT_BUDGET,
+            out_col="budget_mult", lam=BUDGET_LAM,
+            credit=p.get("role_tape_w"),
+            fit=p["team_fit"] if (TEAM_FIT and FIT_BUDGET) else None)
+
     p["role_tgt"] = p["team_tgt_pg"] * p["slot_tgt_share"]
     p["role_route"] = p["slot_route"]
 
@@ -1408,12 +1888,23 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     if "exp_td" in p.columns:
         p["Scoring"] = pd.concat([pct("exp_td"), pct("td")], axis=1).mean(axis=1)
 
-    # ---- SITUATION. Pace, and how much the offence throws. Same direction as
-    # the receivers' -- pass volume is the friend here, not the run -- but worth
-    # only 4 points against their 8. A tight end's share of the pool barely
-    # moves with the pass rate (+0.03), so a throwing offence lifts him only by
-    # throwing more overall, which the Volume factor is already reading.
-    p["Situation"] = pd.concat([pct("plays_pg"), pct("pass_rate")], axis=1).mean(axis=1)
+    # ---- SITUATION. Pace, how much the offence throws, and who is already
+    # standing in front of him. Same direction as the receivers' on the first
+    # two -- pass volume is the friend here, not the run -- but worth only 4
+    # points against their 8. A tight end's share of the pool barely moves with
+    # the pass rate (+0.03), so a throwing offence lifts him only by throwing
+    # more overall, which the Volume factor is already reading.
+    #
+    # The third term is Heath's crowded room, inverted so that a small receiver
+    # room scores high. See ROOM_CROWD. Rows with no room on file fall back to
+    # the other two terms rather than to 50, so a missing lookup cannot pull a
+    # player toward the middle of a factor he would otherwise have topped.
+    sit = [pct("plays_pg"), pct("pass_rate")]
+    if ROOM_CROWD and "wr_room_share" in p.columns:
+        room = pd.to_numeric(p["wr_room_share"], errors="coerce")
+        if room.notna().sum() >= 30:
+            sit.append(100.0 - pct("wr_room_share"))
+    p["Situation"] = pd.concat(sit, axis=1).mean(axis=1)
 
     # ---- AVAILABILITY. Age curve times his three-year durability, weighted
     # toward last season. Not a percentile -- an
@@ -1604,11 +2095,11 @@ def _row_flags(row) -> dict:
     Renaming it here would mean a second copy of the same handler in the page,
     so the name stays and the caption on the control says 65%.
 
-    "crowded" is always False on this board. CROWDED_TEAMS is deliberately empty
-    -- a second tight end costs the first nothing measurable (TE1 points against
-    the TE2's route share, r=+0.004 across 254 seasons), so there is nothing to
-    name. The key is kept so every board hands the page the same shape, and the
-    tight-end filter simply doesn't offer the option.
+    "crowded" now fires here, and it did not used to. The old note said the set
+    was empty because a second tight end costs the first nothing measurable, and
+    that is still true of the second tight end -- but the room that matters is
+    the receivers', and theirs does cost him. See CROWDED_TEAMS. The flag is a
+    fact on the row like the rest of these; the deduction lives in Situation.
 
     The two career-year flags run later than the receivers'. "prime" is years
     three to seven rather than three to five, and "late" starts at eight rather
@@ -1773,6 +2264,7 @@ def build_upcoming(sa, team_season, players, current_map, season, pool) -> tuple
     wt = win_totals()
     fwd = implied_totals()
     clay = clay_projections()
+    room = _room_map(sa)
     rows, skipped = [], []
     for _, cm in current_map.iterrows():
         pid = str(cm.get("gsis_id") or "")
@@ -1802,6 +2294,7 @@ def build_upcoming(sa, team_season, players, current_map, season, pool) -> tuple
             "durability": b.get("dur3", np.nan),
             "win_total": wt.get((season, team)),
             "implied_fwd": fwd.get((season, team)),
+            "wr_room_share": room.get((season - 1, team)),
             "is_starter": bool(cm.get("is_starter", False)),
             "depth_rank": cm.get("depth_rank"),
             "clay_rank": (float(c["clay_rank"]) if c is not None

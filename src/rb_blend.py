@@ -53,6 +53,7 @@ import numpy as np
 import pandas as pd
 
 from . import availability, calibration, config, rankings, scoring
+from . import team_budget
 
 # --- Model constants --------------------------------------------------------
 K_TD = 10.0         # TD regression: games needed to fully trust observed TDs
@@ -111,6 +112,80 @@ CEIL_SLOPE = 1.10   # additional points per weighted touch per game
 #
 # The gap between slot 1 and slot 2 is the whole reason this factor exists.
 SLOT_SHARE = {1: 0.389, 2: 0.222, 3: 0.115, 4: 0.078, 5: 0.059}
+
+# HOW BIG HIS BACKFIELD SHARE ACTUALLY IS, NOT HOW BIG SLOT 1's USUALLY IS.
+#
+# The table above is a league average. Every lead back in the league reads 38.9%
+# of his own backfield, whether he is Ashton Jeanty at 83.1% or a lead back in a
+# genuine committee at 45%. That number is all of Role and half of Backfield, so
+# the board has been pricing the depth-chart line and never the workload.
+#
+# Measured against the season each back actually went on to have, over 830 back
+# seasons: his own backfield share scores +0.695, the slot table +0.542. Where
+# the measurement exists it should be most of the answer -- believed in
+# proportion to how much of last season he played and whether it was even for
+# this team, the same dial the receivers' board uses for the depth slot itself.
+#
+#   played 17 last year, same team   0.75 on the tape
+#   played 13                        0.53
+#   played 9 or fewer                0.30
+#   changed teams                    0.15   -- wrong room entirely
+#
+# ROLE_TAPE 0.0 turns the whole thing off, back to the table alone.
+TAPE_W_MAX, TAPE_W_MIN = 0.75, 0.30
+TAPE_GAMES_HI, TAPE_GAMES_LO = 17.0, 9.0
+TAPE_W_MOVED = 0.15
+ROLE_TAPE = 1.0
+
+# AN INJURY IS NOT A REASON TO STOP BELIEVING THE TAPE.
+#
+# The ramp above asks one question -- how much of LAST season did we watch him in
+# this role -- and that question punishes exactly the wrong player. A back who
+# held 80% of his backfield for two straight years and then missed five weeks of
+# the second one reads as barely-watched, and half his job comes back from a
+# league-average table that knows nothing about him. That is the same mistake the
+# receivers' board made with CeeDee Lamb, and it gets the same answer: widen the
+# window. `prev_games3` is the mean games over the recent seasons and is already
+# on every row.
+#
+# Taking the larger of the two means a healthy player is unaffected (his two
+# numbers agree), a player with one lost season is judged on the seasons around
+# it, and a player who has been unavailable for years is still discounted,
+# because then BOTH numbers are low.
+#
+# What this does NOT do is excuse him on availability. How many games he plays
+# next year is priced separately, off dur3 -- and there the missed time still
+# counts against him, as it should. This dial is only about whether we believe
+# what we saw when he was on the field.
+TAPE_WINDOW = True
+
+# TOP-DOWN: DOES THIS ROSTER ADD UP TO ONE TEAM?
+#
+# Every share above is a bottom-up read of one player. Nothing checked the sum
+# until a reconciliation pass measured it, and the sums were wrong -- badly on
+# some rosters. src/team_budget.py holds the measured ceilings and the whole
+# argument. Set False to switch the correction off; it is a straight A/B.
+TEAM_BUDGET = True
+
+# How hard to pull. 1.0 snaps the roster onto the budget; lower leaves room
+# for a genuinely concentrated offence. Set from the A/B, per board.
+# Swept 0 -> 1 on 830 back seasons: 0.7215 off, 0.7249 at 0.4, 0.7260 at 1.0.
+# Full pull, because this board's gap is a near-uniform table error (top four
+# backs given 80% of their own backfield when the real four take 99.6%), and a
+# uniform error is exactly the kind you should correct all the way.
+BUDGET_LAM = 1.0
+
+# HOW MUCH OF A SEASON HAS TO BE THERE BEFORE ITS RATES ARE BELIEVED.
+#
+# HEALTHY_GAMES above was being spent as a turnstile -- a ten-game season counted
+# whole, a nine-game season counted for nothing, and the direction of the error
+# flips on one game either side of the line. These turn the same judgement into a
+# weight: 0.15 at four games or fewer, full at fourteen. _bundle() is the only
+# reader, and it now applies the 0.6/0.27/0.13 recency weights to the rate
+# columns as well, which the docstring always claimed it did and it did not.
+CRED_GAMES_LO, CRED_GAMES_HI = 4.0, 14.0
+CRED_MIN = 0.15
+CRED_MIN_GAMES = 2
 
 # How far a team's backfield workload is pulled back toward the league median.
 # Last year's team total is evidence about this year, not a promise.
@@ -628,19 +703,39 @@ def _bundle(pdf: pd.DataFrame, as_of: int) -> dict | None:
         return None
     cand = prior[prior["season"] >= as_of - RECENCY]
     healthy = cand[cand["games"] >= HEALTHY_GAMES]
-    use = healthy if len(healthy) else (cand if len(cand) else prior)
-    use = use.sort_values("season", ascending=False).head(3)
+
+    # A PARTIAL SEASON IS EVIDENCE, JUST WEAKER EVIDENCE. See CRED_GAMES_LO.
+    # A one-game cameo is noise rather than a season and would otherwise take up
+    # one of the three slots; `prior` is left alone, so career_games, prev_games
+    # and durability still read every appearance.
+    pool = cand if len(cand) else prior
+    rate_pool = pool[pd.to_numeric(pool["games"], errors="coerce").fillna(0)
+                     >= CRED_MIN_GAMES]
+    use = (rate_pool if len(rate_pool) else pool).sort_values(
+        "season", ascending=False).head(3)
     if use.empty:
         return None
-    wts = np.array([0.6, 0.27, 0.13][: len(use)], dtype=float)
+    rec = np.array([0.6, 0.27, 0.13][: len(use)], dtype=float)
+    g = pd.to_numeric(use["games"], errors="coerce").fillna(0.0)
+    cred = ((g - CRED_GAMES_LO) / (CRED_GAMES_HI - CRED_GAMES_LO)).clip(CRED_MIN, 1.0)
+    wts = rec * cred.to_numpy(dtype=float)
+    if not np.isfinite(wts).any() or wts.sum() <= 0:
+        wts = rec
+    wts = wts / wts.sum()
 
     out = {"talent_reg": float(np.average(use["tot_fp_reg_pg"].to_numpy(), weights=wts))}
     for col in _BUNDLE_MEANS:
-        if col in use.columns:
-            v = pd.to_numeric(use[col], errors="coerce").dropna()
-            out[col.replace("_fp_reg_pg", "_val")] = float(v.mean()) if len(v) else np.nan
-        else:
-            out[col.replace("_fp_reg_pg", "_val")] = np.nan
+        key = col.replace("_fp_reg_pg", "_val")
+        if col not in use.columns:
+            out[key] = np.nan
+            continue
+        v = pd.to_numeric(use[col], errors="coerce").to_numpy(dtype="float64")
+        m = np.isfinite(v)
+        # WEIGHTED, not the flat mean this used to take. The docstring has always
+        # said the most recent season counts most; only talent_reg above actually
+        # did it, so every rate column -- backfield share included -- was reading
+        # a three-year average with a hurt season in it at full strength.
+        out[key] = float((v[m] * wts[m]).sum() / wts[m].sum()) if m.any() else np.nan
 
     prior_sorted = prior.sort_values("season")
     last = prior_sorted.iloc[-1]
@@ -886,6 +981,47 @@ def attach_role_window(prof: pd.DataFrame, sa: pd.DataFrame,
                     for i, s in zip(p["player_id"], p["season"])],
                    index=p.index, dtype=float)
     p["depth_share"] = sh.fillna(p["depth_rank"].map(SLOT_SHARE))
+
+    # 3b. AND THEN THE SIZE OF THE JOB HE ACTUALLY HELD. See ROLE_TAPE above.
+    #     Both numbers so far are chart readings: one from the published chart,
+    #     one from the league-average table behind it. Neither knows the
+    #     difference between a lead back who takes 83% of his backfield and one
+    #     who splits it down the middle. His measured share does, so blend it in
+    #     on the believe-the-tape ramp -- full weight to a back who played a
+    #     whole season for this team, almost none to one who just moved.
+    #
+    #     No leakage: bf_share here is the recency-weighted read of seasons
+    #     STRICTLY BEFORE this row's season, built by entering_profiles, so the
+    #     backtest is testing the change rather than being told the answer.
+    if ROLE_TAPE > 0:
+        pg = pd.to_numeric(p.get("prev_games"), errors="coerce")
+        if TAPE_WINDOW:                          # see TAPE_WINDOW -- the Lamb case
+            pg = pd.concat([pg, pd.to_numeric(p.get("prev_games3"), errors="coerce")],
+                           axis=1).max(axis=1)
+        ramp = ((pg - TAPE_GAMES_LO) / (TAPE_GAMES_HI - TAPE_GAMES_LO)).clip(0.0, 1.0)
+        tape_w = TAPE_W_MIN + (TAPE_W_MAX - TAPE_W_MIN) * ramp
+        if "mover" in p.columns:
+            tape_w = tape_w.where(~p["mover"].fillna(False).astype(bool), TAPE_W_MOVED)
+        tape_w = tape_w.fillna(TAPE_W_MIN)
+        meas = pd.to_numeric(p.get("bf_share"), errors="coerce")
+        w = (tape_w * ROLE_TAPE).clip(0.0, 1.0).where(meas.notna(), 0.0)
+        p["depth_share"] = (1.0 - w) * p["depth_share"] + w * meas.fillna(0.0)
+        p["role_tape_w"] = w
+
+    # ---- 3c. make the backfield add up to one backfield --------------------
+    # See src/team_budget.py. This one ran the other way: the depth table gave
+    # a team's top four backs 80% of their own backfield, when the real top four
+    # take 99.6% of it -- the RB board was quietly leaving a fifth of every
+    # backfield to nobody.
+    # This one runs the other way, so the share being handed OUT goes to the
+    # backs the board is guessing about rather than to the measured lead back --
+    # same rule, opposite sign. See CREDIT_WEIGHTED in src/team_budget.py.
+    if TEAM_BUDGET:
+        p["depth_share"] = team_budget.scale(
+            p, "depth_share", team_budget.RB_BF_BUDGET,
+            out_col="budget_mult", lam=BUDGET_LAM,
+            credit=p.get("role_tape_w"))
+
     p["role_opp"] = p["team_bf"] * p["depth_share"]
 
     # 4. Where he is in his career, and whether he's already cleared the bar.
@@ -1103,13 +1239,23 @@ def add_indices(prof: pd.DataFrame, weights: dict | None = None) -> pd.DataFrame
     # Same argument as Role, applied to share instead of volume. For a back who
     # changed teams last year's share is close to meaningless; the slot he's
     # entering camp in is not.
-    if "depth_rank" in p.columns:
-        _slot = p["depth_rank"].map(SLOT_SHARE)
-        if _slot.notna().any():
-            _slot_pct = _slot.groupby(p["season"]).rank(pct=True) * 100
-            p["Backfield"] = np.where(_slot.notna(),
-                                      0.5 * p["Backfield"] + 0.5 * _slot_pct,
-                                      p["Backfield"])
+    #
+    # READS depth_share RATHER THAN THE RAW SLOT TABLE. They are the same thing
+    # for a back with nothing measured behind him, and for everyone else
+    # depth_share is that table already blended with the share he actually held
+    # -- see ROLE_TAPE. Mapping depth_rank straight onto SLOT_SHARE here gave
+    # every RB1 in the league the identical number, which is precisely the half
+    # of this factor that could not tell an 83%-of-the-backfield lead back from a
+    # nominal one, and it was throwing away the half that could.
+    _slot = (pd.to_numeric(p.get("depth_share"), errors="coerce")
+             if ROLE_TAPE > 0 and "depth_share" in p.columns
+             else p["depth_rank"].map(SLOT_SHARE) if "depth_rank" in p.columns
+             else None)
+    if _slot is not None and _slot.notna().any():
+        _slot_pct = _slot.groupby(p["season"]).rank(pct=True) * 100
+        p["Backfield"] = np.where(_slot.notna(),
+                                  0.5 * p["Backfield"] + 0.5 * _slot_pct,
+                                  p["Backfield"])
 
     for gcol in GROUPS:
         p[gcol] = pd.to_numeric(p.get(gcol), errors="coerce").fillna(50.0)

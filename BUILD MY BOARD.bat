@@ -18,27 +18,43 @@ if errorlevel 1 goto nopython
 rem Draft prices first. If the sites are down or the internet is flaky this
 rem step fails and we carry on with the prices already saved -- a bad network
 rem day should never cost you the board.
-echo [1 of 4]  Draft prices...
+echo [1 of 6]  Draft prices...
 echo.
 py scripts\15_pull_adp.py
 if errorlevel 1 echo   (Couldn't refresh prices. Using the ones already saved.)
 
 echo.
-echo [2 of 4]  Quarterbacks...
+echo [2 of 6]  Quarterbacks...
 echo.
 py scripts\06_build_qb_model.py
 if errorlevel 1 goto oops
 
 echo.
-echo [3 of 4]  Running backs...
+echo [3 of 6]  Running backs...
 echo.
 py scripts\11_build_rb_model.py
 if errorlevel 1 goto oops
 
+rem Receivers and tight ends are the two newest models and they lean hardest on
+rem depth charts and snap counts, which can be thin in the offseason. If one of
+rem them has a bad day it says so and the run carries on, rather than costing
+rem you the whole board. The summary at the bottom tells you what you got.
+echo.
+echo [4 of 6]  Receivers...
+echo.
+py scripts\16_build_wr_model.py
+if errorlevel 1 echo   (Receivers didn't build. Carrying on without that tab.)
+
+echo.
+echo [5 of 6]  Tight ends...
+echo.
+py scripts\17_build_te_model.py
+if errorlevel 1 echo   (Tight ends didn't build. Carrying on without that tab.)
+
 rem This is the step that folds every position into ONE page with a tab each.
 rem Without it there is no index.html at all.
 echo.
-echo [4 of 4]  Putting the positions on one page...
+echo [6 of 6]  Putting the positions on one page...
 echo.
 py scripts\12_build_site.py
 if errorlevel 1 goto oops
@@ -47,7 +63,17 @@ echo.
 if not exist "outputs\index.html" goto nopage
 
 echo ================================================
-echo   Done. Opening your board now.
+echo   Done. Here's what made it onto the page:
+echo.
+if exist "outputs\boards\qb.json" (echo     Quarterbacks   yes) else (echo     Quarterbacks   NO)
+if exist "outputs\boards\rb.json" (echo     Running backs  yes) else (echo     Running backs  NO)
+if exist "outputs\boards\wr.json" (echo     Receivers      yes) else (echo     Receivers      NO)
+if exist "outputs\boards\te.json" (echo     Tight ends     yes) else (echo     Tight ends     NO)
+echo.
+echo   Anything showing NO is missing a tab. Scroll up
+echo   to that step, copy the error, send it to Claude.
+echo.
+echo   Opening your board now.
 echo ================================================
 start "" "outputs\index.html"
 echo.

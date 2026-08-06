@@ -80,6 +80,7 @@ import numpy as np
 import pandas as pd
 
 from . import availability, calibration, config, rankings, scoring  # noqa: F401
+from . import team_budget
 
 # ---------------------------------------------------------------------------
 # CONSTANTS -- every one of these is a decision, so each says what it decides
@@ -184,6 +185,66 @@ SLOT_TGT_SHARE = {1: 0.233, 2: 0.182, 3: 0.140, 4: 0.088, 5: 0.057, 6: 0.039}
 TAPE_W_MAX, TAPE_W_MIN = 0.75, 0.30
 TAPE_GAMES_HI, TAPE_GAMES_LO = 17.0, 9.0
 TAPE_W_MOVED = 0.15
+
+# AN INJURY IS NOT A REASON TO STOP BELIEVING THE TAPE.
+#
+# The ramp above asks how much of LAST season we watched him in this role, and
+# on its own that question punishes the wrong player: one lost year wipes out the
+# healthy years either side of it and hands his job back to a league-average
+# table. This is the CeeDee Lamb problem in its purest form -- the reason the
+# depth chart and the tape got blended in the first place -- and the answer is
+# the same one, widen the window.
+#
+# `prev_games3` is the mean games over the recent seasons and is already on every
+# row. Taking the larger of the two leaves a healthy player untouched (his two
+# numbers agree), judges a player with one lost season on the seasons around it,
+# and still discounts a player who has been unavailable for years, because then
+# both numbers are low. Availability is priced separately off dur3, where the
+# missed time does still count against him.
+TAPE_WINDOW = True
+
+# HOW CENTRAL HE IS TO HIS OWN OFFENCE, NOT HOW CENTRAL HIS SPOT USUALLY IS.
+#
+# The table above is a league average keyed on a rank. Every WR1 in the league
+# reads 0.233 of his team's targets, whether he is Ja'Marr Chase at 0.322 or the
+# nominal number one on a run-first team at 0.17. That number is 35% of Volume
+# and the fallback for Role, so the board has been pricing the job title.
+#
+# Measured against the season each receiver actually went on to have, over 1282
+# seasons: his own target share scores +0.718, the slot table +0.668. Where the
+# measurement exists it should be most of the answer -- believed on the same
+# terms as the depth slot itself, tape_w, so a receiver who missed half of last
+# year keeps leaning on the table and one who changed teams almost entirely does.
+#
+#   1.0  measured share is worth its full tape_w
+#   0.0  off -- league-average table only, the behaviour before this
+ROLE_TAPE = 1.0
+
+# TOP-DOWN: DOES THIS ROSTER ADD UP TO ONE TEAM?
+#
+# Every share above is a bottom-up read of one player. Nothing checked the sum
+# until a reconciliation pass measured it, and the sums were wrong -- badly on
+# some rosters. src/team_budget.py holds the measured ceilings and the whole
+# argument. Set False to switch the correction off; it is a straight A/B.
+TEAM_BUDGET = True
+
+# How hard to pull. 1.0 snaps the roster onto the budget; lower leaves room
+# for a genuinely concentrated offence. Set from the A/B, per board.
+# Swept 0 -> 1 on 1282 receiver seasons: 0.7555, 0.7564, 0.7570, 0.7573, 0.7577,
+# 0.7579, 0.7584. Monotone, so the full pull.
+BUDGET_LAM = 1.0
+
+# HOW MUCH OF A SEASON HAS TO BE THERE BEFORE ITS RATES ARE BELIEVED.
+#
+# HEALTHY_GAMES above was being spent as a turnstile: a season at twelve games
+# counted whole, a season at eleven counted for nothing at all, and the direction
+# of the error flips on one game either side of the line. These turn the same
+# judgement into a weight -- 0.15 at four games or fewer, full at fourteen, so a
+# receiver who played eleven hurt lands at 0.70 rather than being deleted.
+# _bundle() is the only reader.
+CRED_GAMES_LO, CRED_GAMES_HI = 4.0, 14.0
+CRED_MIN = 0.15
+CRED_MIN_GAMES = 2
 
 # ---------------------------------------------------------------------------
 # THE TWO SCREENS FROM HEATH'S RESEARCH
@@ -870,16 +931,30 @@ _BUNDLE_MEANS = [
 def _bundle(pdf: pd.DataFrame, as_of) -> dict | None:
     """Recency-weighted read of one receiver, as of the start of `as_of`.
 
-    Only seasons he was actually available for -- a six-game year is a fact
-    about his hamstring, not about his rate -- and only inside the recency
-    window. Weights 0.6 / 0.27 / 0.13, same as the backs.
+    Seasons inside the recency window, each weighted by recency AND by how much
+    of it there was -- a six-game year is a fact about his hamstring, not about
+    his rate, but it is not nothing either. Recency 0.6 / 0.27 / 0.13, same as
+    the backs; see CRED_GAMES_LO for the games ramp that multiplies it.
     """
     hist = pdf[(pdf["season"] < as_of) & (pdf["season"] >= as_of - RECENCY)]
     if hist.empty:
         return None
-    healthy = hist[hist["games"] >= HEALTHY_GAMES]
-    use = (healthy if not healthy.empty else hist).sort_values("season", ascending=False).head(3)
-    wts = np.array([0.6, 0.27, 0.13][:len(use)], dtype="float64")
+
+    # A PARTIAL SEASON IS EVIDENCE, JUST WEAKER EVIDENCE. See CRED_GAMES_LO.
+    # A one-game cameo is noise rather than a season and would otherwise take up
+    # one of the three slots; `hist` itself is left alone, so prev_games,
+    # career_games and durability still read every appearance.
+    rate_pool = hist[pd.to_numeric(hist["games"], errors="coerce").fillna(0)
+                     >= CRED_MIN_GAMES]
+    if rate_pool.empty:
+        rate_pool = hist
+    use = rate_pool.sort_values("season", ascending=False).head(3)
+    g = pd.to_numeric(use["games"], errors="coerce").fillna(0.0)
+    cred = ((g - CRED_GAMES_LO) / (CRED_GAMES_HI - CRED_GAMES_LO)).clip(CRED_MIN, 1.0)
+    wts = (np.array([0.6, 0.27, 0.13][:len(use)], dtype="float64")
+           * cred.to_numpy(dtype="float64"))
+    if not np.isfinite(wts).any() or wts.sum() <= 0:
+        wts = np.array([0.6, 0.27, 0.13][:len(use)], dtype="float64")
     wts = wts / wts.sum()
 
     def wavg(col):
@@ -1100,6 +1175,9 @@ def attach_role_window(prof: pd.DataFrame, sa: pd.DataFrame, players) -> pd.Data
     # tape in proportion to how much of last season he actually played and
     # whether it was even for this team. See TAPE_W_MAX above.
     pg = pd.to_numeric(p.get("prev_games"), errors="coerce")
+    if TAPE_WINDOW:                              # see TAPE_WINDOW -- the Lamb case
+        pg = pd.concat([pg, pd.to_numeric(p.get("prev_games3"), errors="coerce")],
+                       axis=1).max(axis=1)
     ramp = ((pg - TAPE_GAMES_LO) / (TAPE_GAMES_HI - TAPE_GAMES_LO)).clip(0.0, 1.0)
     tape_w = TAPE_W_MIN + (TAPE_W_MAX - TAPE_W_MIN) * ramp
     if "mover" in p.columns:
@@ -1140,6 +1218,36 @@ def attach_role_window(prof: pd.DataFrame, sa: pd.DataFrame, players) -> pd.Data
         np.interp(slot_f, ks, [SLOT_ROUTE[int(k)] for k in ks]), index=p.index)
     p["slot_tgt_share"] = pd.Series(
         np.interp(slot_f, ks, [SLOT_TGT_SHARE[int(k)] for k in ks]), index=p.index)
+
+    # ---- 3b. what HIS job is worth, not what the average one is -----------
+    # See ROLE_TAPE above. No leakage: target_share and route_share here are the
+    # recency-weighted read of seasons STRICTLY BEFORE the row's season, built by
+    # entering_profiles, so the backtest is testing the change rather than being
+    # told the answer.
+    if ROLE_TAPE > 0:
+        meas_ts = pd.to_numeric(p.get("target_share"), errors="coerce")
+        meas_rt = pd.to_numeric(p.get("route_share"), errors="coerce")
+        w_ts = (tape_w * ROLE_TAPE).clip(0.0, 1.0).where(meas_ts.notna(), 0.0)
+        w_rt = (tape_w * ROLE_TAPE).clip(0.0, 1.0).where(meas_rt.notna(), 0.0)
+        p["slot_tgt_share"] = ((1.0 - w_ts) * p["slot_tgt_share"]
+                               + w_ts * meas_ts.fillna(0.0))
+        p["slot_route"] = ((1.0 - w_rt) * p["slot_route"]
+                           + w_rt * meas_rt.fillna(0.0))
+        p["role_tape_w"] = w_ts
+
+    # ---- 3c. make the roster add up to one team ---------------------------
+    # See src/team_budget.py. Left alone, this team's receivers were holding a
+    # median 97% of its targets with nothing left for the backs, and the spread
+    # between the most and least crowded roster was 48% of a passing game. The
+    # within-team order the block above just computed is preserved exactly.
+    # The cut lands on whichever receivers the board is guessing about rather
+    # than on the one it measured -- see CREDIT_WEIGHTED in src/team_budget.py.
+    if TEAM_BUDGET:
+        p["slot_tgt_share"] = team_budget.scale(
+            p, "slot_tgt_share", team_budget.WR_TGT_BUDGET,
+            out_col="budget_mult", lam=BUDGET_LAM,
+            credit=p.get("role_tape_w"))
+
     p["role_tgt"] = p["team_tgt_pg"] * p["slot_tgt_share"]
     p["role_route"] = p["slot_route"]
 

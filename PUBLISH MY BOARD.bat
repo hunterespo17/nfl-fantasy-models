@@ -16,16 +16,17 @@ if errorlevel 1 goto nopython
 
 rem ------------------------------------------------ website builder fix ----
 rem One time only. The instructions GitHub follows to rebuild the website were
-rem still the quarterback-only ones, so running backs were never going to show
-rem up there no matter what you sent. If the replacement is sitting in this
-rem folder, drop it into place and get rid of the spare copy.
+rem missing the tight ends, so that tab was never going to show up there no
+rem matter what you sent. If the replacement is sitting in this folder, drop it
+rem into place and get rid of the spare copies.
 if not exist "website-builder-update.txt" goto builderok
 if not exist ".github\workflows\." mkdir ".github\workflows" 2>nul
 copy /y "website-builder-update.txt" ".github\workflows\deploy.yml" >nul
 if errorlevel 1 goto badcopy
 del "website-builder-update.txt" >nul 2>nul
-echo   Fixed the website's instructions -- it now publishes every position,
-echo   not just quarterbacks. This part only happens once.
+del "DEPLOY-PASTE-THIS.yml" >nul 2>nul
+echo   Fixed the website's instructions -- it now publishes all four
+echo   positions, tight ends included. This part only happens once.
 echo.
 :builderok
 
@@ -34,33 +35,56 @@ rem ---------------------------------------------------------------- build ----
 rem Draft prices first. If the sites are down or the internet is flaky this
 rem step fails and we carry on with the prices already saved -- a bad network
 rem day should never cost you the board.
-echo [1 of 4]  Draft prices...
+echo [1 of 6]  Draft prices...
 echo.
 py scripts\15_pull_adp.py
 if errorlevel 1 echo   (Couldn't refresh prices. Using the ones already saved.)
 
 echo.
-echo [2 of 4]  Quarterbacks...
+echo [2 of 6]  Quarterbacks...
 echo.
 py scripts\06_build_qb_model.py
 if errorlevel 1 goto oops
 
 echo.
-echo [3 of 4]  Running backs...
+echo [3 of 6]  Running backs...
 echo.
 py scripts\11_build_rb_model.py
 if errorlevel 1 goto oops
 
+rem Receivers and tight ends are the two newest models and they lean hardest on
+rem depth charts and snap counts, which can be thin in the offseason. If one of
+rem them has a bad day it says so and the run carries on, rather than costing
+rem you the whole board. The summary further down tells you what you got.
+echo.
+echo [4 of 6]  Receivers...
+echo.
+py scripts\16_build_wr_model.py
+if errorlevel 1 echo   (Receivers didn't build. Carrying on without that tab.)
+
+echo.
+echo [5 of 6]  Tight ends...
+echo.
+py scripts\17_build_te_model.py
+if errorlevel 1 echo   (Tight ends didn't build. Carrying on without that tab.)
+
 rem This is the step that folds every position into ONE page with a tab each.
 rem Without it there is no index.html and nothing to publish.
 echo.
-echo [4 of 4]  Putting the positions on one page...
+echo [6 of 6]  Putting the positions on one page...
 echo.
 py scripts\12_build_site.py
 if errorlevel 1 goto oops
 
 if not exist "outputs\index.html" goto nopage
 
+echo.
+echo   Here's what made it onto the page:
+echo.
+if exist "outputs\boards\qb.json" (echo     Quarterbacks   yes) else (echo     Quarterbacks   NO)
+if exist "outputs\boards\rb.json" (echo     Running backs  yes) else (echo     Running backs  NO)
+if exist "outputs\boards\wr.json" (echo     Receivers      yes) else (echo     Receivers      NO)
+if exist "outputs\boards\te.json" (echo     Tight ends     yes) else (echo     Tight ends     NO)
 echo.
 echo   Board built. Opening it so you can look while I publish.
 start "" "outputs\index.html"
@@ -88,10 +112,16 @@ if errorlevel 1 goto norepo
 
 "%GIT%" add -A
 rem Belt and braces: the price files live under data\, which used to be ignored
-rem wholesale. Force them in so the website's builder has prices to work with.
-for %%F in (adp.csv adp_history.csv playcallers.csv win_totals.csv) do (
-    if exist "data\%%F" "%GIT%" add -f "data/%%F" >nul 2>nul
-)
+rem wholesale. Force them all in so the website's builder has prices, Clay's
+rem projections and win totals to work with.
+for %%F in ("data\*.csv") do "%GIT%" add -f "data\%%~nxF" >nul 2>nul
+
+rem The models live in src\. A brand new file there is the classic way for a
+rem position to vanish off the website -- the code that needs it goes up, the
+rem file it imports does not, and that board dies on the server while working
+rem perfectly here. Sweep both folders again so that cannot happen. (No -f:
+rem that would drag Python's junk cache folders along too.)
+"%GIT%" add -A "src" "scripts" >nul 2>nul
 
 "%GIT%" diff --cached --quiet
 if not errorlevel 1 goto nothingnew

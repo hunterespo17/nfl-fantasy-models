@@ -394,10 +394,28 @@ def injury_games(injury, pos: str = "RB"):
 # a near-perfect three-year record a receiver comes back for 14.4 games and
 # repeats 17 in 37% of cases, against 11.7% for backs.
 #
+# Tight ends were fitted the same way and they need their own line too, for the
+# same reason receivers did: falling through to the backs' line was pricing them
+# as the wrong body. Job size here is targets per game over 6, not the receivers'
+# 9 -- the average TE1 sees 5.1 targets a game, so 9 is a bar almost no tight end
+# clears and every one of them would have read as jobless. Fitted on 395 tight end
+# seasons in 2019-2023 and checked on the 175 in 2024-2025 the fit never saw:
+#
+#     3 years of games + job    3.13     <- this one
+#     one flat average          3.76
+#
+# The shape of the line is the story. The three-year term is the SMALLEST of the
+# four positions at 6.37, and the job term is the second largest at 4.42. Translated:
+# a tight end's injury history tells you less about next season than anyone else's,
+# and what he is asked to do tells you more. That is a position where the top of
+# the depth chart plays and the bottom of it is a rotating cast of blockers, so
+# "how many games did he play" is mostly a question about whether he had the job.
+#
 #                  intercept  3yr avail   job
 BASE_FIT = {"RB": (3.66, 8.80, 2.77),
             "QB": (0.56, 13.08, 1.18),
-            "WR": (4.18, 7.96, 3.45)}
+            "WR": (4.18, 7.96, 3.45),
+            "TE": (4.44, 6.37, 4.42)}
 BASE_DEFAULT = (3.66, 8.80, 2.77)
 BASE_MIN, BASE_MAX = 4.0, 17.0
 
@@ -417,7 +435,23 @@ RISK_CEILING, RISK_FLOOR = 15.0, 8.0
 # which makes sense. They are the freshest bodies in the league, and the reason
 # they got the job in the first place is usually that they were available for it.
 # The receivers are the most available of the three, and by some distance.
-ROOKIE_GAMES = {"RB": 13.5, "QB": 10.5, "WR": 14.5}
+#
+# Tight ends had to be measured on draft capital rather than on usage, because a
+# usage screen at this position selects on the answer -- a rookie tight end who
+# clears a target bar has already been told he is available. Across all 144 rookie
+# tight ends 2018-2025 the mean is 7.6 games, but that pools two different
+# populations, and the split is stark:
+#
+#     rounds 1-2   n=25   12.9 games   (median 13)
+#     round 3      n=19    8.6 games
+#     rounds 4-7   n=54    8.0 games
+#     undrafted    n=46    3.7 games
+#
+# A drafted-on-day-two tight end is a real player who plays; the back half of the
+# class is camp bodies who appear for four weeks. 13.0 is the day-one/day-two
+# number, which is the crowd this board actually carries -- an undrafted rookie
+# tight end does not survive MIN_CAREER_GAMES or a depth chart's top three.
+ROOKIE_GAMES = {"RB": 13.5, "QB": 10.5, "WR": 14.5, "TE": 13.0}
 ROOKIE_DEFAULT = 13.5
 
 _HAND: dict[str, dict] = {}
