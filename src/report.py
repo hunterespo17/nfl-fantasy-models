@@ -297,21 +297,44 @@ _TEMPLATE = r"""<!DOCTYPE html>
     --shadow:0 1px 2px rgba(0,0,0,.5),0 16px 34px -20px rgba(0,0,0,.8);}}
   *{box-sizing:border-box}
   body{margin:0;background:var(--plane);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased}
-  /* The board needs ~1110px to show all 13 columns without a sideways scroll.
-     Prose stays narrow (long lines are hard to read); only the board goes wide. */
-  .wrap{max-width:1192px;margin:0 auto;padding:0 20px 80px}
-  #overview{max-width:1000px}
-  header{position:sticky;top:0;z-index:5;background:linear-gradient(105deg,var(--brand),var(--brand-2));border-bottom:0;padding:16px 0 0;box-shadow:0 4px 18px -6px rgba(0,0,0,.35)}
-  .hgrid{max-width:1192px;margin:0 auto;padding:0 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-  h1{font-size:23px;margin:0;font-weight:800;letter-spacing:-.02em;color:var(--on-brand);text-transform:uppercase}
-  .sub{color:rgba(255,255,255,.82);font-size:13px;margin:3px 0 0}
+  /* --- how wide the page is ----------------------------------------------
+     The board carries thirteen columns and wants every pixel it can get; prose
+     wants about eighty characters and gets unreadable past it. So the PAGE is
+     wide and the PARAGRAPHS are capped, rather than the whole thing being
+     pinned to the narrower of the two needs. One variable so the header, the
+     body and the detail panel below can never drift apart. */
+  :root{--page:1400px;--gut:24px;--measure:84ch}
+  .wrap{max-width:var(--page);margin:0 auto;padding:0 var(--gut) 80px}
+  #overview{max-width:1080px}
+  .card>p,.card>.note,.card>h2+p{max-width:var(--measure)}
+  header{position:sticky;top:0;z-index:5;background:linear-gradient(105deg,var(--brand),var(--brand-2));border-bottom:0;padding:14px 0 0;box-shadow:0 6px 22px -10px rgba(0,0,0,.5)}
+  .hgrid{max-width:var(--page);margin:0 auto;padding:0 var(--gut);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  /* A mark rather than another line of type: at a glance the header should read
+     as a masthead and not as the first row of the table. */
+  .mark{width:38px;height:38px;border-radius:11px;flex:0 0 auto;display:grid;place-items:center;
+    background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.26);
+    color:#fff;font-weight:800;font-size:13px;letter-spacing:.04em}
+  h1{font-size:21px;margin:0;font-weight:800;letter-spacing:-.01em;color:var(--on-brand);text-transform:uppercase}
+  .sub{color:rgba(255,255,255,.80);font-size:12.5px;margin:2px 0 0}
   .spacer{flex:1}
-  .tabs{display:flex;gap:4px;margin:14px 0 0}
-  .tab{border:0;background:transparent;color:rgba(255,255,255,.72);font:inherit;font-size:14px;font-weight:650;padding:11px 15px;border-bottom:3px solid transparent;cursor:pointer;transition:color .12s}
+  .tabband{border-top:1px solid rgba(255,255,255,.14);margin-top:12px}
+  .tabband .hgrid{gap:0}
+  .tabs{display:flex;gap:2px;margin:0;overflow-x:auto;scrollbar-width:none;max-width:100%}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{border:0;background:transparent;color:rgba(255,255,255,.70);font:inherit;font-size:13.5px;font-weight:650;padding:12px 15px;border-bottom:3px solid transparent;cursor:pointer;transition:color .12s;white-space:nowrap}
   .tab:hover{color:#fff}
   .tab[aria-selected="true"]{color:#fff;border-bottom-color:#fff}
-  .toggle{border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);color:#fff;font:inherit;font-size:12px;font-weight:600;padding:6px 11px;border-radius:8px;cursor:pointer;transition:background .12s}
+  .toggle{border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);color:#fff;font:inherit;font-size:12px;font-weight:600;padding:7px 12px;border-radius:9px;cursor:pointer;transition:background .12s}
   .toggle:hover{background:rgba(255,255,255,.22)}
+  /* One row for every control bar on the page. They were each hand-spaced with
+     inline styles and drifted apart by a few pixels a piece; naming the pattern
+     is what stops that happening again. */
+  /* NOT ".bar" -- that name is already the projection fill inside .bartrack, and
+     a margin meant for a toolbar pushed every one of those fills clean out of its
+     9px track, so the whole board showed empty grey bars. */
+  .ctlrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
+  .chead{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+  .chead h2{margin:0;flex:1 1 auto}
   /* "a newer board is live" chip. Hidden unless the copy you're looking at is
      genuinely older than the one on the server — see the freshness check. */
   .fresh{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(12px);z-index:40;
@@ -337,6 +360,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
   [hidden]{display:none !important}
   .card{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);padding:22px 24px;margin:0 0 18px;box-shadow:var(--shadow)}
   h2{font-size:18px;font-weight:750;margin:0 0 12px;letter-spacing:-.015em}
+  /* Two columns of explainer on a wide screen, one on a narrow one. Reading
+     material only -- nothing that has to line up with anything else goes in
+     here, so the reflow can never break a comparison. */
+  .cols2{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:0 34px}
+  .cols2>*{min-width:0}
   h3{font-size:12px;font-weight:700;margin:0 0 8px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
   p{margin:0 0 12px;color:var(--ink-2);font-size:14.5px}p strong{color:var(--ink);font-weight:600}
   .stat{display:inline-flex;gap:8px;align-items:baseline;background:var(--plane);border:1px solid var(--border);border-radius:10px;padding:8px 14px;margin:2px 8px 2px 0}
@@ -357,12 +385,33 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .slider input{width:100%}
   .btn{border:1px solid var(--border);background:var(--surface-1);color:var(--ink-2);font:inherit;font-size:12.5px;padding:6px 12px;border-radius:8px;cursor:pointer}
   .search{font:inherit;font-size:14px;padding:8px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface-1);color:var(--ink);min-width:180px}
-  /* table */
+  /* --- table -------------------------------------------------------------
+     Restyled rather than rebuilt. Three things changed and each has a reason.
+     The header row got its own tint and a heavier bottom rule, so on a 128-row
+     receiver board you can tell at a glance whether you are looking at the top
+     of the table or a divider row halfway down it. Every numeric cell is
+     tabular, so a column of points per game lines up on the decimal instead of
+     shimmering as the digits change width. And the hover state grew a 3px accent
+     edge on the left: on a wide screen a faint background wash on a 1400px row
+     is genuinely hard to see, and mis-clicking a row on draft day opens the
+     wrong player. */
   table{width:100%;border-collapse:collapse;font-size:14px}
-  thead th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);font-weight:700;padding:2px 10px 9px;border-bottom:2px solid var(--border);white-space:nowrap}
+  thead th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);font-weight:700;padding:10px 10px 9px;border-bottom:2px solid var(--baseline);white-space:nowrap;background:var(--plane)}
+  thead th:first-child{border-top-left-radius:9px;border-bottom-left-radius:0}
+  thead th:last-child{border-top-right-radius:9px}
   thead th.num{text-align:right}
   tbody td{padding:12px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
-  tbody tr.row{cursor:pointer;transition:background .12s}tbody tr.row:hover{background:var(--accent-soft)}
+  tbody td.num,td.num,th.num{font-variant-numeric:tabular-nums}
+  tbody tr.row{cursor:pointer;transition:background .12s}
+  tbody tr.row:hover{background:var(--accent-soft)}
+  /* The accent edge goes on the two boards that don't already have one. The
+     position boards carry the tier rail down that same edge and a second stripe
+     beside it would read as a second tier. */
+  #bigbody tr.row>td:first-child,#dftbody tr.row>td:first-child{
+    box-shadow:inset 3px 0 0 transparent;transition:box-shadow .12s}
+  #bigbody tr.row:hover>td:first-child,#dftbody tr.row:hover>td:first-child{
+    box-shadow:inset 3px 0 0 var(--accent)}
+  tbody tr.row:last-child>td{border-bottom:0}
   /* League-winner filter. Non-matching QBs are dimmed and sorted underneath rather
      than removed: mid-draft, the row you suddenly need is exactly the one a real
      filter would have hidden. Hovering brings a dimmed row most of the way back so
@@ -469,8 +518,21 @@ _TEMPLATE = r"""<!DOCTYPE html>
   th.mkt{color:var(--ink)}
   /* Market is bold wherever it appears — it's what the site columns roll up into */
   td.mkt{font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
-  .whycol{max-width:180px;line-height:1.9}
-  .fl{display:inline-block;font-size:10.5px;font-weight:700;border-radius:20px;padding:2px 9px;white-space:nowrap}
+  /* The Why column, and the one bug in it that mattered.
+     It was capped at 180px with every chip set to never wrap, so any chip whose
+     text ran past 180px -- "Rarely makes it through a year" -- pushed out of the
+     cell, past the last column, and got cut off by the table's own scroll box:
+     "Rarely makes it through a yea". A flag you can't read is worse than no flag,
+     because you can see that something was said and not what.
+     Two changes. The column is given a real range instead of a hard cap, so on a
+     wide screen it simply has the room. And a chip that still doesn't fit wraps
+     onto a second line inside itself rather than overflowing -- which is why the
+     radius comes down from 20px to 12px, since a two-line pill at radius 20 reads
+     as a lozenge with a dent in it. Single-line chips are ~24px tall, so 12px is
+     still a full round end and nothing about the common case changes. */
+  .whycol{min-width:186px;max-width:300px;line-height:2}
+  .fl{display:inline-block;font-size:10.5px;font-weight:700;border-radius:12px;padding:2px 9px;
+    white-space:normal;text-wrap:balance}
   .fl.g{background:rgba(0,120,60,.16);color:var(--good)}
   .fl.a{background:rgba(190,130,0,.18);color:#9a6600}
   .fl.r{background:rgba(210,60,60,.16);color:var(--neg)}
@@ -603,6 +665,17 @@ _TEMPLATE = r"""<!DOCTYPE html>
      as a rail down the right, so a replacement is always one glance from the
      price. Under 900px the rail drops underneath instead of sitting off the side
      of the horizontally-scrolling table where you'd never find it. */
+  /* The second bug worth writing down. This panel lives in a cell that spans the
+     whole table, and the table is inside a box that scrolls sideways. So when the
+     table was wider than the screen, the panel was too -- and the comps rail, being
+     the right-hand column of it, sat off the right edge where you had to scroll the
+     board sideways to find it. You never would.
+     The fix is to pin the panel to the width you can actually see rather than to
+     the width of the table: it sticks to the left edge of the scroll box and is
+     never wider than the card. Now the rail is beside the player at every window
+     size, and scrolling the board sideways slides the columns under a panel that
+     stays put. --dboxw is the card's inner width, floored to the viewport. */
+  .dbox{position:sticky;left:0;width:min(calc(var(--page) - 2*var(--gut) - 36px),calc(100vw - 2*var(--gut) - 36px))}
   .dcols{display:grid;grid-template-columns:minmax(0,1fr) minmax(238px,290px);gap:4px 28px;align-items:start}
   .dmain,.drail{min-width:0}
   .drail .sim{margin:0}
@@ -687,12 +760,114 @@ _TEMPLATE = r"""<!DOCTYPE html>
      no number here" and had no rule, so a dash meant to recede read as data. */
   .mut{color:var(--muted)}
   @media(max-width:640px){.wname{width:auto}}
+
+  /* --- your league -------------------------------------------------------
+     One row of controls that turns into one row of facts. It is deliberately
+     the plainest card on the page: it is furniture you use twice a year and
+     then want out of the way, so once a league is linked it collapses to a
+     single line and the board gets the space back. */
+  /* Prose left, the thing you actually type into right. On a wide screen the
+     explanation and the box sit beside each other instead of the box being
+     stranded under a paragraph with half the screen empty next to it; under
+     900px the second column drops below the first, which is what you want on
+     a phone anyway. */
+  .lgsplit{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,380px);gap:6px 34px;align-items:start}
+  @media(max-width:900px){.lgsplit{grid-template-columns:minmax(0,1fr)}}
+  .lgsplit>div:last-child{border:1px solid var(--border);border-radius:13px;background:var(--plane);padding:14px 15px}
+  .lgform{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .lgform .lgin[type=text]{flex:1 1 150px;min-width:0}
+  .lgform .hand{flex:1 1 100%;display:flex;gap:9px;align-items:center;flex-wrap:wrap;
+    border-top:1px solid var(--border);padding-top:11px;margin-top:2px}
+  .lgrow{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .lgin{font:inherit;font-size:13px;padding:7px 11px;border:1px solid var(--border);
+    border-radius:9px;background:var(--surface-1);color:var(--ink);width:190px}
+  .lgin:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .btnp{appearance:none;border:0;background:var(--accent);color:#fff;font:inherit;
+    font-size:13px;font-weight:700;border-radius:9px;padding:8px 15px;cursor:pointer}
+  .btnp:hover{filter:brightness(1.08)}
+  .btnp[disabled]{opacity:.5;cursor:default;filter:none}
+  .btng{appearance:none;border:1px solid var(--border);background:var(--plane);color:var(--ink-2);
+    font:inherit;font-size:13px;font-weight:650;border-radius:9px;padding:8px 13px;cursor:pointer}
+  .btng:hover{color:var(--ink);border-color:var(--accent)}
+  .btng[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .lgmsg{font-size:12.5px;line-height:1.6;color:var(--ink-2);margin-top:10px}
+  .lgmsg.err{color:var(--neg)}
+  .lgmsg.ok{color:var(--good)}
+  .lgfacts{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .lgfacts .f{border:1px solid var(--border);border-radius:11px;padding:8px 12px;background:var(--plane);
+    flex:0 1 auto}
+  .lgfacts .f b{display:block;font-size:14.5px;font-weight:700;line-height:1.25}
+  .lgfacts .f span{font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--muted);
+    text-transform:uppercase}
+  /* the live dot: the one thing on the page that has to say "this is moving" */
+  .live{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--good)}
+  .live i{width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block;
+    animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  @media(prefers-reduced-motion:reduce){.live i{animation:none}}
+  .rosters{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-top:12px}
+  .rosters .t{border:1px solid var(--border);border-radius:11px;padding:10px 12px;background:var(--plane);
+    font-size:12.5px}
+  .rosters .t.me{border-color:var(--accent);background:var(--accent-soft)}
+  .rosters .t h4{margin:0 0 6px;font-size:12.5px;font-weight:800;letter-spacing:.02em}
+  .rosters .t ul{margin:0;padding:0;list-style:none;line-height:1.75}
+  .rosters .t li span{color:var(--muted);font-weight:700;font-size:10px;letter-spacing:.05em;
+    display:inline-block;width:26px}
+
+  /* --- tiers and the cliff ----------------------------------------------
+     A tier count is only interesting next to the number of picks between now
+     and your next turn. Three left and eight picks to wait is a cliff; three
+     left and one pick to wait is not. So the two numbers live in the same
+     card and the card colours itself. */
+  .cliffs{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .cliffs .c{flex:1 1 160px;border:1px solid var(--border);border-radius:11px;padding:9px 12px;
+    background:var(--plane)}
+  .cliffs .c.warn{border-color:var(--neg);background:color-mix(in srgb,var(--neg) 8%,transparent)}
+  .cliffs .c.safe{border-color:var(--good)}
+  .cliffs .c .l{font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--muted);
+    text-transform:uppercase}
+  .cliffs .c .n{font-size:14.5px;font-weight:700;margin-top:3px;line-height:1.3}
+  .cliffs .c .s{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.45}
+  .cliffs .c.warn .s{color:var(--neg)}
+  .tierchip{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.04em;
+    padding:2px 6px;border-radius:6px;background:var(--grid);color:var(--ink-2);margin-left:6px;
+    vertical-align:middle;white-space:nowrap}
+  .lastt{color:var(--neg);background:color-mix(in srgb,var(--neg) 15%,transparent)}
+  /* a man who will not survive to your next turn */
+  #dfttbl tr.fading td.qb b{text-decoration:underline;text-decoration-color:var(--neg);
+    text-decoration-thickness:2px;text-underline-offset:3px}
+  #dfttbl tr.mine td{background:color-mix(in srgb,var(--accent) 9%,transparent)}
+  #dfttbl tr.mine .tk{background:var(--good);border-color:var(--good);color:#fff;opacity:1}
+  .myturn{border:1px solid var(--accent);background:var(--accent-soft);border-radius:12px;
+    padding:10px 14px;margin-top:12px;font-size:13.5px;font-weight:650;color:var(--ink)}
+
+  /* --- draft-day mode ----------------------------------------------------
+     Not a different page: the same board with everything you do not read at
+     speed taken away. Bigger type, three columns, no prose. It is a class on
+     the section so nothing has to be re-rendered to turn it on. */
+  #draft.dday .hidesm{display:none}
+  /* The league card survives the switch when a league is linked, because that is
+     where the "following your draft" light lives and losing it is exactly the
+     wrong thing to lose mid-draft. Unlinked, it is just a form and it goes. */
+  #draft.dday #lgcard:not(.linked){display:none}
+  #draft.dday #lgcard{padding:12px 16px}
+  #draft.dday #dfttbl{font-size:17px}
+  #draft.dday #dfttbl td{padding:11px 12px}
+  #draft.dday #dfttbl td.qb b{font-size:19px}
+  #draft.dday #dfttbl th{font-size:12px}
+  #draft.dday .bav .b .n{font-size:19px}
+  #draft.dday .bav .b{padding:12px 14px}
+  #draft.dday .cliffs .c .n{font-size:19px}
+  #draft.dday .myturn{font-size:16px;padding:14px 18px}
+  #draft.dday .card{padding:16px 18px}
+  #draft.dday tr.rdsep td{font-size:13px;padding:9px 12px}
 </style>
 </head>
 <body>
 <header>
   <div class="hgrid">
-    <div><h1 id="pageTitle">NFL Projection Models <span class="pill" id="seasonPill"></span></h1>
+    <div class="mark" aria-hidden="true">NFL</div>
+    <div><h1 id="pageTitle">Projection Models <span class="pill" id="seasonPill"></span></h1>
       <div class="sub" id="subline"></div></div>
     <div class="spacer"></div>
     <!-- There used to be a cross-link here to the other position's board, back
@@ -705,7 +880,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
        per position, then the combined Big Board, then a single "How it works".
        Rankings first and open by default -- the board is what you came for on
        draft day; "How it works" is reference material you read once. -->
-  <div class="hgrid"><div class="tabs" role="tablist" id="tabs"></div></div>
+  <div class="tabband"><div class="hgrid"><div class="tabs" role="tablist" id="tabs"></div></div></div>
 </header>
 
 <div class="wrap">
@@ -1068,7 +1243,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <p style="margin-bottom:14px">Drag any factor and the projections and ranking update instantly. This is the
       model's mix, in your hands.</p>
       <div class="panel" id="sliders"></div>
-      <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <div class="ctlrow">
         <button class="btn" id="reset">Reset to defaults</button>
         <label class="note" style="margin:0">Drafting on&nbsp;<select class="sortsel" id="platsel"></select></label>
         <label class="note" style="margin:0">Sort&nbsp;
@@ -1114,17 +1289,61 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <!-- The draft board. Not "what is he worth" but "when do I take him", which is
        a different question and needs the positional correction in draftboard.py. -->
   <section id="draft">
+    <!-- Your league. Sleeper only for now, and read-only: it asks for a username,
+         never a password, and every call is a plain GET that anyone could make.
+         Sits above the board because everything below it — replacement level,
+         where you pick, who is already gone — changes once it is linked. -->
+    <div class="card" id="lgcard">
+      <div class="lgsplit hidesm">
+        <div>
+          <h2>Your league</h2>
+          <p>Type your <strong>Sleeper</strong> username and this board will match your league's
+          size and starting spots, work out where you pick, and — while your draft is running —
+          cross players off as the room takes them. It only ever reads; there is no password and
+          nothing is sent anywhere. ESPN needs a login cookie copied out of your browser, so it
+          is coming after this one.</p>
+        </div>
+        <div class="lgform" id="lgconnect">
+          <input class="lgin" id="lguser" type="text" placeholder="Sleeper username" aria-label="Sleeper username" autocomplete="off">
+          <button class="btnp" id="lggo" type="button">Connect</button>
+          <div class="hand">
+            <span class="note" style="margin:0">or by hand:</span>
+            <label class="note" style="margin:0">I pick&nbsp;<input class="lgin" id="lgslot" type="number" min="1" max="20" style="width:62px" aria-label="My draft slot"></label>
+            <label class="note" style="margin:0">of&nbsp;<input class="lgin" id="lgteams" type="number" min="4" max="20" style="width:62px" aria-label="Teams in the league"></label>
+          </div>
+        </div>
+      </div>
+      <div class="lgrow" id="lgleagues" style="margin-top:12px" hidden></div>
+      <div class="lgfacts" id="lgfacts" hidden></div>
+      <div class="lgrow" id="lgactions" style="margin-top:12px" hidden>
+        <button class="btng" id="lglive" type="button" aria-pressed="false">Follow the draft</button>
+        <button class="btng" id="lgrosters" type="button" aria-pressed="false">Show everyone's rosters</button>
+        <button class="btng" id="lgdrop" type="button">Unlink</button>
+      </div>
+      <div class="rosters" id="lgroster" hidden></div>
+      <p class="lgmsg" id="lgmsg"></p>
+    </div>
+
     <div class="card">
-      <h2>The draft board</h2>
-      <p>Where each man actually goes. It starts from points over replacement — the
-      VORP Rankings tab — and then fixes the thing that ranking gets wrong on draft day:
-      <strong>you start one quarterback and one tight end, but two or three backs and
-      receivers</strong>, so the same points over replacement are not worth the same at
-      every position. Left uncorrected this board took tight ends
-      <strong>thirty-two picks too early</strong>.</p>
-      <p class="note" id="dftprem" style="margin-top:10px"></p>
-      <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <label class="note" style="margin:0">Pull toward the room&nbsp;
+      <div class="chead">
+        <h2>The draft board</h2>
+        <button class="btng" id="ddaybtn" type="button" aria-pressed="false"
+          title="Bigger type, fewer columns, no prose — for having this open while you draft">Draft-day mode</button>
+      </div>
+      <!-- Two columns: what the board is on the left, what it did to the numbers on
+           the right. Stacked, the second one reads as an afterthought and the right
+           half of a wide screen sits empty. -->
+      <div class="cols2 hidesm">
+        <p style="margin-top:10px">Where each man actually goes. It starts from points over replacement — the
+        VORP Rankings tab — and then fixes the thing that ranking gets wrong on draft day:
+        <strong>you start one quarterback and one tight end, but two or three backs and
+        receivers</strong>, so the same points over replacement are not worth the same at
+        every position. Left uncorrected this board took tight ends
+        <strong>thirty-two picks too early</strong>.</p>
+        <p class="note" id="dftprem" style="margin-top:10px"></p>
+      </div>
+      <div class="ctlrow">
+        <label class="note hidesm" style="margin:0">Pull toward the room&nbsp;
           <select class="sortsel" id="dftpull">
             <option value="0">None — our board only</option>
             <option value="0.15">Light</option>
@@ -1137,12 +1356,18 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <label class="note" style="margin:0"><input type="checkbox" id="dfthide"> Hide who's gone</label>
         <button class="tk" id="dftclear" type="button">Reset the board</button>
       </div>
+      <div class="myturn" id="dftturn" hidden></div>
       <div class="bav" id="dftbav"></div>
+      <div class="cliffs" id="dftcliff"></div>
+    </div>
+    <div class="card" id="mysquad" hidden>
+      <h2 style="margin:0 0 4px;font-size:17px">My team</h2>
+      <div class="rosters" id="mysquadbox" style="margin-top:10px"></div>
     </div>
     <div class="card" style="padding:14px 16px">
       <div class="tblwrap"><table id="dfttbl"><thead id="dfthead"></thead><tbody id="dftbody"></tbody></table></div>
     </div>
-    <p class="note" id="dftnote"></p>
+    <p class="note hidesm" id="dftnote"></p>
   </section>
 
   <!-- The value board. Everyone from every position in one ranking, on points over
@@ -1159,7 +1384,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
       worth, not when to take him. The Big Board tab is this one with positional scarcity
       priced in, and that is the one to draft off.</p>
       <p class="note" id="bigrepl" style="margin-top:10px"></p>
-      <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <div class="ctlrow">
         <label class="note" style="margin:0">Sort&nbsp;
           <select class="sortsel" id="bigsort">
             <option value="vor">Value over replacement</option>
@@ -1198,6 +1423,57 @@ const $=s=>document.querySelector(s);
 const fmt=(n,d=1)=>(n==null||isNaN(n))?"–":Number(n).toFixed(d);
 const ORDER=(SITE.order&&SITE.order.length)?SITE.order.slice():Object.keys(SITE.boards||{});
 const POSPL_MAP={QB:"QBs",RB:"RBs",WR:"WRs",TE:"TEs"};
+
+/* --- what the page remembers ---------------------------------------------
+   Everything that is YOURS rather than the model's -- who is off the board,
+   which of those are on your team, the league you linked, where you pick --
+   lives in one object here and is written to the browser's own storage. A
+   draft board that forgets the first four rounds because you refreshed the
+   tab is not a draft board.
+
+   Three decisions worth writing down:
+
+     * players are remembered BY NAME, not by rank. Rank is a fact about a
+       build; publish a new board on the Wednesday and every stored rank
+       points at a different man. The name is the player.
+     * it is namespaced and versioned. If the shape below ever changes, bump
+       MEM_KEY rather than trying to migrate -- a stale half-read board is
+       worse than an empty one, and an empty one costs you four clicks.
+     * every read and every write is wrapped. Private windows, storage turned
+       off, a quota that is already full: all of them throw, and none of them
+       are a reason for the page not to load. You lose the memory, not the
+       board.
+
+   Writes are debounced because crossing a man off re-renders the table, and
+   a draft has a run of eight picks in ten seconds more often than you would
+   think. */
+const MEM_KEY="nflmodels.board.v1";
+const MEM_DEF={taken:[],mine:[],league:null,slot:null,teams:null,names:{},ui:{}};
+let MEM=Object.assign({},MEM_DEF);
+try{
+  const raw=localStorage.getItem(MEM_KEY);
+  if(raw){const o=JSON.parse(raw); if(o&&typeof o==="object")MEM=Object.assign({},MEM_DEF,o);}
+}catch(e){}
+let memTimer=null;
+function saveMem(){
+  clearTimeout(memTimer);
+  memTimer=setTimeout(()=>{try{localStorage.setItem(MEM_KEY,JSON.stringify(MEM));}catch(e){}},200);
+}
+/* TAKEN is the whole room; MINE is the part of it that is yours. MINE is a
+   subset of TAKEN by construction -- a player on your team is by definition
+   off the board -- and every place that adds to MINE adds to TAKEN too. */
+const TAKEN=new Set(Array.isArray(MEM.taken)?MEM.taken:[]);
+const MINE=new Set(Array.isArray(MEM.mine)?MEM.mine:[]);
+function memBoard(){MEM.taken=[...TAKEN];MEM.mine=[...MINE];saveMem();}
+/* Names as the site spells them, folded down to what two sources can agree on:
+   case, punctuation and the Jr./III on the end. Sleeper writes "Marvin
+   Harrison" where we write "Marvin Harrison Jr.", and a draft board that
+   fails to cross a man off because of a suffix is worse than no sync at all. */
+function nkey(s){
+  return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^a-z ]/g,"").split(/\s+/).filter(w=>w&&!["jr","sr","ii","iii","iv","v"].includes(w))
+    .join(" ").trim();
+}
 
 /* Which position this board is. Everywhere below that used to write a literal
    "QB" in front of a rank number writes POS, so an RB board says RB12 and not
@@ -1474,8 +1750,22 @@ let REPL=11;
 let TEAMS=12;
 let RD10=120;   // pick 120: the last pick of Round 10, which is where Heath's screen starts
 function replIndex(pos){   // 0-based index of the first unstartable player
+  /* A linked league overrides the built-in number, and this is the single most
+     valuable thing linking one buys you. Replacement level IS the league: in a
+     10-team league that starts two backs the first unstartable back is RB25 and
+     not RB30, and every value on the board is measured against him. Get the
+     league wrong and the whole board is quietly wrong by a constant that
+     differs per position -- exactly the kind of error that never looks like
+     one. lgRepl() below works these out from the league's own roster slots. */
+  const lg=MEM.league;
+  if(lg&&lg.repl&&lg.repl[pos])return Math.max(0,Math.round(lg.repl[pos])-1);
   const rm=(SITE.boards[pos]||{}).ratings_meta||{};
-  return Math.max(0,(rm.repl_rank||12)-1);
+  const base=rm.repl_rank||12;
+  // No linked league but you typed a team count: the starting spots are still the
+  // model's, so replacement just scales with the number of teams sharing them.
+  if(MEM.teams&&rm.teams&&MEM.teams!==rm.teams)
+    return Math.max(0,Math.round(base*MEM.teams/rm.teams)-1);
+  return Math.max(0,base-1);
 }
 /* How far apart two projections must be before the order between them means
    anything, in points per game. Measured, not chosen: across 2022-24, every pair
@@ -2819,6 +3109,8 @@ function syncPosChips(){
    ====================================================================== */
 let bigSort="vor", bigPos="ALL";
 function bigTeams(){
+  if(MEM.league&&MEM.league.teams)return MEM.league.teams;   // your league beats the default
+  if(MEM.teams)return MEM.teams;                             // ...and a number you typed beats it too
   for(const p of ORDER){const t=(SITE.boards[p].ratings_meta||{}).teams; if(t)return t;}
   return 12;
 }
@@ -2889,11 +3181,11 @@ function bigRefresh(){
   // What replacement level actually is at each position, in points, right now.
   const repl=ORDER.map(p=>{
     const r=all.find(z=>z.pos===p);
-    const rm=SITE.boards[p].ratings_meta||{};
-    return r?`<b>${p}${rm.repl_rank||"–"}</b> at ${fmt(r.repl,1)}`:null;
+    return r?`<b>${p}${replIndex(p)+1}</b> at ${fmt(r.repl,1)}`:null;
   }).filter(Boolean);
+  const lgw=MEM.league?`your ${teams}-team league`:`a ${teams}-team half-PPR league`;
   $("#bigrepl").innerHTML=`Replacement level right now — ${repl.join(", ")} pts/gm. `+
-    `Everything above is measured against those, in a ${teams}-team half-PPR league. `+
+    `Everything above is measured against those, in ${lgw}. `+
     `Move a weight slider on any position tab and these move with it.`;
 
   // Round rules, but only in the board's own order. Under any other sort the rows
@@ -2984,8 +3276,16 @@ $("#bigsearch").oninput=bigRefresh;
 const DRAFT=Object.assign({premium:{},slope:{},pull:0.15,full:17,fitted:false},SITE.draft||{});
 const PULLWORD={"0":"off","0.15":"Light","0.25":"Moderate","0.35":"Strong","0.5":"Heavy"};
 let dftPull=Number(DRAFT.pull||0), dftPos="ALL", dftHide=false;
-const TAKEN=new Set();                       // in memory only, gone on refresh
-const dkey=r=>r.pos+"#"+r.x.rank;
+/* TAKEN and MINE are declared at the top of the script and restored from
+   storage, so a board you crossed off on Tuesday is still crossed off on
+   Sunday. The key is position plus folded name -- see nkey() up there for why
+   it is not the rank. */
+const dkey=r=>r.pos+"|"+nkey(r.x.name);
+/* Every key this board knows, built once. The live draft feed matches against it
+   so that a pick which doesn't match can be counted and said out loud, rather
+   than quietly leaving a drafted man sitting on your board. */
+const DKEYS=new Set();
+ORDER.forEach(p=>{((SITE.boards[p]||{}).qbs||[]).forEach(x=>{DKEYS.add(p+"|"+nkey(x.name));});});
 
 /* The slope for a position, already faded by the dial. Written out rather than
    inlined because "1 plus (1-w) times (slope minus 1)" is the one line here that
@@ -3013,11 +3313,14 @@ function dftRows(){
   return rows;
 }
 function dftHeader(){
-  $("#dfthead").innerHTML=`<tr><th></th><th class="num">#</th><th>Player</th>`+
+  $("#dfthead").innerHTML=`<tr>`+
+    `<th title="Somebody in the room took him"></th>`+
+    `<th title="You took him"></th>`+
+    `<th class="num">#</th><th>Player</th>`+
     `<th class="num">Proj</th>`+
-    `<th class="num" title="Points per game over replacement at his own position, scaled and shifted by this board's positional fit">Draft value</th>`+
+    `<th class="num hidesm" title="Points per game over replacement at his own position, scaled and shifted by this board's positional fit">Draft value</th>`+
     `<th class="num" title="Average overall pick across the sites that really rank him">Market pick</th>`+
-    `<th title="Where the market takes him against where this board takes him">Vs market</th></tr>`;
+    `<th class="hidesm" title="Where the market takes him against where this board takes him">Vs market</th></tr>`;
 }
 /* The correction, in words, at whatever the dial is set to. Shape first, because
    it is the bigger of the two effects and much the less obvious one. */
@@ -3063,11 +3366,136 @@ function dftBav(rows){
       `<div class="s">board ${r.rank} · ${gone}</div></div>`;
   }).join("");
 }
+
+/* --- where your turns are ------------------------------------------------
+   A snake draft in one line: in an odd round you pick slot-th, in an even one
+   you pick (teams+1-slot)-th. Everything about the cliff warnings below hangs
+   off this, because "will he last" is meaningless without "until when".
+
+   picksMade is deliberately just the count of who is off the board. When the
+   draft is linked live that number is the truth; when you are crossing men off
+   by hand it is still the truth, as long as you cross off everyone and not
+   only the ones you were interested in. There is no third source to check it
+   against, so the page says which one it is using rather than pretending. */
+const ROUNDS=16;
+function mySlot(){const s=Number(MEM.slot); return (s>=1&&s<=32)?s:null;}
+function myPicks(){
+  const slot=mySlot(); if(!slot)return [];
+  const t=bigTeams(), out=[];
+  for(let rd=1;rd<=ROUNDS;rd++)
+    out.push((rd-1)*t + (rd%2 ? slot : t+1-slot));
+  return out;
+}
+function picksMade(){return TAKEN.size;}
+function nextPick(){
+  const made=picksMade();
+  return myPicks().find(n=>n>made) ?? null;
+}
+/* Who the room is likely to take between now and your next turn. Market pick
+   is an average, so this is a tendency and not a promise -- the copy says so
+   rather than dressing it up with a probability we have not measured. */
+function goneBy(rows,pick){
+  if(pick==null)return new Set();
+  const s=new Set();
+  rows.forEach(r=>{if(!TAKEN.has(dkey(r))&&r.pick!=null&&r.pick<pick)s.add(dkey(r));});
+  return s;
+}
+function dftTurn(rows){
+  const el=$("#dftturn"), slot=mySlot();
+  if(!slot){el.hidden=true;return;}
+  const t=bigTeams(), made=picksMade(), np=nextPick();
+  if(np==null){el.hidden=false;
+    el.innerHTML=`All ${ROUNDS} of your picks are in. `+
+      `<span class="mut" style="font-weight:400">Reset the board when you want a clean one.</span>`;
+    return;}
+  const rd=Math.ceil(np/t), wait=np-made-1;
+  const fading=goneBy(rows,np);
+  const best=rows.find(r=>!TAKEN.has(dkey(r)));
+  el.hidden=false;
+  el.innerHTML=`You are up at <b>pick ${np}</b> — round ${rd}, `+
+    (wait<=0?`you're on the clock now`:`${wait} pick${wait===1?"":"s"} away`)+`. `+
+    (best?`Best on the board is <b>${best.x.name}</b>. `:"")+
+    (fading.size?`<span class="mut" style="font-weight:400">About ${fading.size} of the men above you `+
+      `usually go before you pick again — they're underlined below.</span>`:"");
+}
+
+/* --- tiers and the cliff -------------------------------------------------
+   The tier a player is in comes off his own position board; what this adds is
+   the only question a tier is ever asked on draft day, which is whether it
+   survives your wait. Three backs left in a tier reads as comfortable until
+   you notice eleven picks stand between you and your next turn.
+
+   Warned only when the tier genuinely empties. A card that shouts at every
+   position every round is a card you stop reading by the third round. */
+function dftCliff(rows){
+  const np=nextPick(), fading=goneBy(rows,np);
+  $("#dftcliff").innerHTML=ORDER.map(p=>{
+    const left=rows.filter(r=>r.pos===p&&!TAKEN.has(dkey(r)));
+    if(!left.length)return `<div class="c"><div class="l">${p}</div>`+
+      `<div class="n">—</div><div class="s">nobody left</div></div>`;
+    const tier=Math.min(...left.map(r=>r.x.tier??99));
+    const band=left.filter(r=>(r.x.tier??99)===tier);
+    const survive=band.filter(r=>!fading.has(dkey(r))).length;
+    const cls=np==null?"":(survive===0?" warn":(survive>=3?" safe":""));
+    const line=np==null
+      ? `${band.length} left at this level`
+      : survive===0
+        ? `all ${band.length} usually gone before pick ${np}`
+        : `${survive} of ${band.length} usually last to pick ${np}`;
+    return `<div class="c${cls}"><div class="l">${p} · tier ${tier}</div>`+
+      `<div class="n">${band.length} left</div><div class="s">${line}</div></div>`;
+  }).join("");
+}
+
+/* --- your team ----------------------------------------------------------
+   Two jobs: what you have, and what you still have to start. Starting spots
+   come from the linked league when there is one and from the model's own
+   default when there is not, so the "still needed" line is never a guess
+   dressed as a fact. */
+function myNeeds(){
+  const lg=MEM.league;
+  return (lg&&lg.starters)||{QB:1,RB:2,WR:2,TE:1,FLEX:1};
+}
+function mySquad(rows){
+  const box=$("#mysquad");
+  if(!MINE.size){box.hidden=true;return;}
+  box.hidden=false;
+  const mine=rows.filter(r=>MINE.has(dkey(r)));
+  const need=myNeeds(), have={};
+  mine.forEach(r=>{have[r.pos]=(have[r.pos]||0)+1;});
+  const short=ORDER.map(p=>{
+    const n=(need[p]||0)-(have[p]||0);
+    return n>0?`${n} more ${p}`:null;}).filter(Boolean);
+  const flex=Math.max(0,(need.FLEX||0)-Math.max(0,
+    ORDER.filter(p=>p!=="QB").reduce((t,p)=>t+Math.max(0,(have[p]||0)-(need[p]||0)),0)));
+  if(flex>0)short.push(`${flex} flex`);
+  const list=ORDER.flatMap(p=>mine.filter(r=>r.pos===p))
+    .map(r=>`<li><span>${r.pos}</span> ${r.x.name}</li>`).join("");
+  $("#mysquadbox").innerHTML=
+    `<div class="t me"><h4>${mine.length} player${mine.length===1?"":"s"}</h4><ul>${list}</ul></div>`+
+    `<div class="t"><h4>Still to start</h4>`+
+    (short.length?`<ul>${short.map(s=>`<li>${s}</li>`).join("")}</ul>`
+                 :`<ul><li>Your starting lineup is full.</li></ul>`)+`</div>`;
+}
 function dftRefresh(){
   const teams=bigTeams(), q=($("#dftsearch").value||"").trim().toLowerCase();
   const all=dftRows();
   dftPrem();
   dftBav(all);
+  dftTurn(all);
+  dftCliff(all);
+  mySquad(all);
+  const np=nextPick(), fading=goneBy(all,np);
+  // Best remaining tier per position, so the row chip can say "last of tier 2"
+  // -- the one tier fact that changes a pick, rather than a number you have to
+  // hold four of in your head to use.
+  const bandLeft={};
+  ORDER.forEach(p=>{
+    const left=all.filter(r=>r.pos===p&&!TAKEN.has(dkey(r)));
+    if(!left.length)return;
+    const t=Math.min(...left.map(r=>r.x.tier??99));
+    bandLeft[p]={tier:t,n:left.filter(r=>(r.x.tier??99)===t).length};
+  });
   const rows=all.filter(r=>(dftPos==="ALL"||r.pos===dftPos)
     &&(!q||r.x.name.toLowerCase().includes(q))
     &&(!dftHide||!TAKEN.has(dkey(r))));
@@ -3077,41 +3505,344 @@ function dftRefresh(){
   let seen=0;
   $("#dftbody").innerHTML=rows.map(r=>{
     const rd=Math.ceil(r.rank/teams);
-    const bar=(rule&&rd>seen)?(seen=rd,`<tr class="rdsep"><td colspan="7">Round ${rd}</td></tr>`):"";
+    const bar=(rule&&rd>seen)?(seen=rd,`<tr class="rdsep"><td colspan="8">Round ${rd}</td></tr>`):"";
     const ecls=r.edge==null?"":r.edge>=teams?"val":r.edge<=-teams?"rch":"";
     const eword=r.edge==null?'<span class="mut">—</span>'
       :r.edge>=teams?`<span class="vt g">▲ lasts ${Math.round(r.edge)} picks longer</span>`
       :r.edge<=-teams?`<span class="vt r">▼ goes ${Math.round(-r.edge)} picks earlier</span>`
       :`<span class="mut">about where he's drafted</span>`;
-    const k=dkey(r), gone=TAKEN.has(k);
+    const k=dkey(r), gone=TAKEN.has(k), mine=MINE.has(k);
     const flat=Math.abs(r.slope-1)<0.005, shift=Math.abs(r.prem)<0.005;
     const ptitle=(flat&&shift)?""
       : ` title="${fmt(r.vor,1)} over replacement`+
         (flat?"":` × ${fmt(r.slope,2)} ${r.pos} spread`)+
         (shift?"":` ${r.prem>0?"+":"−"} ${fmt(Math.abs(r.prem),2)} ${r.pos} shift`)+
         `"`;
-    return bar+`<tr class="row${gone?" gone":""}" data-bpos="${r.pos}" data-id="${r.x.rank}" data-k="${k}">
-      <td class="tkc"><button class="tk" type="button" title="${gone?"Put him back":"Cross him off"}">${gone?"↺":"✓"}</button></td>
+    // The tier chip only appears on the men it changes a decision for: the last
+    // one or two of the best band still standing at their position. On every
+    // other row it is a number you already knew.
+    const bl=bandLeft[r.pos];
+    const chip=(!gone&&bl&&(r.x.tier??99)===bl.tier&&bl.n<=2)
+      ? `<span class="tierchip lastt">${bl.n===1?"last":"2 left"} of ${r.pos} tier ${bl.tier}</span>`
+      : (!gone&&r.x.tier!=null?`<span class="tierchip">T${r.x.tier}</span>`:"");
+    const fade=(!gone&&fading.has(k))?" fading":"";
+    return bar+`<tr class="row${gone?" gone":""}${mine?" mine":""}${fade}" data-bpos="${r.pos}" data-id="${r.x.rank}" data-k="${k}">
+      <td class="tkc"><button class="tk" type="button" title="${gone?"Put him back on the board":"Somebody took him"}">${gone?"↺":"✓"}</button></td>
+      <td class="tkc"><button class="tk mk" type="button" title="${mine?"He isn't mine after all":"I took him"}">${mine?"★":"☆"}</button></td>
       <td class="rank num">${r.rank}</td>
-      <td class="qb"><span class="pc ${r.pos}">${r.pos}</span> <b>${r.x.name}</b>${teamCell(r.x.team)}</td>
+      <td class="qb"><span class="pc ${r.pos}">${r.pos}</span> <b>${r.x.name}</b>${teamCell(r.x.team)}${chip}</td>
       <td class="num">${fmt(r.proj,1)}</td>
-      <td class="num vor${r.val<0?" neg":""}"${ptitle}>${r.val>0?"+":""}${fmt(r.val,1)}</td>
+      <td class="num vor${r.val<0?" neg":""} hidesm"${ptitle}>${r.val>0?"+":""}${fmt(r.val,1)}</td>
       <td class="num">${pickCell(r)}</td>
-      <td class="rd ${ecls}">${eword}</td></tr>`;
-  }).join("")||`<tr><td colspan="7" class="note">Nobody matches that.</td></tr>`;
+      <td class="rd ${ecls} hidesm">${eword}</td></tr>`;
+  }).join("")||`<tr><td colspan="8" class="note">Nobody matches that.</td></tr>`;
 
   $("#dftbody").querySelectorAll("tr.row").forEach(tr=>{
     tr.onclick=()=>jumpTo(tr.dataset.bpos,tr.dataset.id);
+    const k=tr.dataset.k;
     tr.querySelector(".tk").onclick=e=>{
       e.stopPropagation();                   // otherwise crossing him off jumps tabs
-      const k=tr.dataset.k;
-      TAKEN.has(k)?TAKEN.delete(k):TAKEN.add(k);
-      dftRefresh();
+      if(TAKEN.has(k)){TAKEN.delete(k);MINE.delete(k);}else TAKEN.add(k);
+      memBoard(); dftRefresh();
+    };
+    // Two buttons because they are two different facts. "He is gone" is about
+    // the room; "he is mine" is about you, and the second one implies the first
+    // but not the other way round -- so starring a man also crosses him off.
+    tr.querySelector(".tk.mk").onclick=e=>{
+      e.stopPropagation();
+      if(MINE.has(k))MINE.delete(k); else {MINE.add(k);TAKEN.add(k);}
+      memBoard(); dftRefresh();
     };
   });
-  $("#dftnote").textContent=`${rows.length} players shown, ${TAKEN.size} crossed off. `+
-    `Projections are per game. Crossing players off is only for this sitting — `+
-    `it isn't saved, so a refresh gives you a clean board.`;
+  const src=LIVE.on?"Sleeper is crossing them off as the room picks."
+    :"Crossing a man off is saved in this browser, so a refresh keeps your board.";
+  $("#dftnote").textContent=`${rows.length} players shown, ${TAKEN.size} off the board, `+
+    `${MINE.size} on your team. Projections are per game. ${src}`;
+}
+
+/* --- your league, via Sleeper -------------------------------------------
+   Sleeper's read API takes no key and no password: you give it a username, it
+   gives you back public league facts that anyone could ask it for. That is the
+   whole reason this is Sleeper first and ESPN second -- ESPN's equivalent needs
+   a login cookie copied out of your own browser, and a page served from GitHub
+   Pages cannot ask for one honestly.
+
+   Three things get built out of a linked league, in rising order of how much
+   they change the board:
+
+     * where you pick and how many teams there are -- moves the round bars, the
+       "who lasts to your turn" arithmetic, and every cliff warning;
+     * the starting spots -- moves replacement level, which is the single number
+       every value on this board is measured against;
+     * the live pick feed -- crosses men off as the room takes them.
+
+   Everything is wrapped and every failure lands as a sentence in #lgmsg rather
+   than a dead panel. The one failure I cannot test from here is the browser
+   refusing the request outright on cross-origin grounds; Sleeper's docs describe
+   a public read API and it is used this way all over, but until it has run in a
+   real browser it is a hope and not a fact, so the message says what to do if it
+   does not work rather than pretending it cannot happen. */
+const SLEEPER="https://api.sleeper.app/v1";
+const LIVE={on:false,timer:null,draft:null,seen:new Set(),fails:0};
+const LG_SEASON=String((SITE.meta&&SITE.meta.season)||new Date().getFullYear());
+
+function lgSay(t,cls){
+  const el=$("#lgmsg"); el.className="lgmsg"+(cls?" "+cls:""); el.innerHTML=t;
+}
+async function sget(path){
+  const r=await fetch(SLEEPER+path,{cache:"no-store"});
+  if(r.status===404)return null;                 // Sleeper's "no such thing"
+  if(!r.ok)throw new Error("Sleeper answered "+r.status);
+  return await r.json();
+}
+function lgFail(e){
+  const net=(e instanceof TypeError);           // what a blocked fetch looks like
+  lgSay(net
+    ? `Your browser wouldn't let this page talk to Sleeper. That is a setting on `+
+      `their side, not something you did wrong — everything else on this page still `+
+      `works, and you can set your league by hand with the two boxes above.`
+    : `Sleeper didn't answer: ${String(e.message||e)}. Try again in a moment, or set `+
+      `your league by hand with the two boxes above.`,"err");
+}
+
+/* Starting spots -> replacement rank. A flex is half a back and half a receiver
+   because that is how flexes are actually used at half-PPR, and because the
+   model's own default league is built on the same split -- 12 teams x (2 backs +
+   half a flex) = RB30, which is the number on every board in this file. Keeping
+   the convention identical is what makes a linked league a correction rather
+   than a second, differently-wrong answer. */
+const FLEXMAP={FLEX:{RB:.5,WR:.5},WRRB_FLEX:{RB:.5,WR:.5},REC_FLEX:{WR:.5,TE:.5},
+  SUPER_FLEX:{QB:1},IDP_FLEX:{}};
+function lgRepl(slots,teams){
+  const per={QB:0,RB:0,WR:0,TE:0};
+  (slots||[]).forEach(s=>{
+    if(per[s]!=null){per[s]+=1;return;}
+    const m=FLEXMAP[s]; if(m)Object.keys(m).forEach(k=>{per[k]+=m[k];});
+  });
+  const repl={},starters={QB:0,RB:0,WR:0,TE:0,FLEX:0};
+  ["QB","RB","WR","TE"].forEach(p=>{repl[p]=Math.max(1,Math.round(per[p]*teams));});
+  (slots||[]).forEach(s=>{
+    if(starters[s]!=null&&s!=="FLEX")starters[s]+=1;
+    else if(FLEXMAP[s]&&s!=="IDP_FLEX")starters.FLEX+=1;
+  });
+  return {repl,starters,per};
+}
+
+/* Half-PPR is baked in at build time -- the projections were fitted under it and
+   there is no way to re-score them in the browser. So a league on a different
+   setting gets told, plainly, which parts of the board still hold. Ranks inside
+   a position survive a scoring change far better than the numbers do. */
+function lgScoringWarn(sc){
+  if(!sc)return "";
+  const rec=Number(sc.rec??0), te=Number(sc.bonus_rec_te??0);
+  const bits=[];
+  if(Math.abs(rec-0.5)>0.01)
+    bits.push(`your league gives <b>${rec} a catch</b> and this board is built on half `+
+      `a point`);
+  if(te>0.01)bits.push(`your league pays tight ends <b>+${te} a catch</b> on top`);
+  if(!bits.length)return "";
+  return `<br>Worth knowing: ${bits.join(", and ")}. The projections can't be re-scored `+
+    `here, so treat the order inside each position as sound and the points themselves `+
+    `as half-PPR points. ${rec>0.5?"Receivers and pass-catching backs are worth a little more to you than shown."
+      :rec<0.5?"Receivers and pass-catching backs are worth a little less to you than shown.":""}`;
+}
+
+async function lgConnect(){
+  const name=($("#lguser").value||"").trim();
+  if(!name){lgSay("Type your Sleeper username first — the one you log in with.","err");return;}
+  $("#lggo").disabled=true; lgSay("Looking you up…");
+  try{
+    const u=await sget("/user/"+encodeURIComponent(name));
+    if(!u||!u.user_id){
+      lgSay(`Sleeper has no user called <b>${name}</b>. It wants the username you log `+
+        `in with, not your team name.`,"err");
+      return;
+    }
+    let season=LG_SEASON;
+    let ls=await sget(`/user/${u.user_id}/leagues/nfl/${season}`)||[];
+    if(!ls.length){                              // maybe the board is a year ahead of Sleeper
+      const st=await sget("/state/nfl").catch(()=>null);
+      const alt=st&&String(st.season);
+      if(alt&&alt!==season){season=alt; ls=await sget(`/user/${u.user_id}/leagues/nfl/${season}`)||[];}
+    }
+    if(!ls.length){
+      lgSay(`Found you, but no ${season} football leagues on that account yet. Once your `+
+        `league is created, come back and press Connect.`,"err");
+      return;
+    }
+    MEM.names=MEM.names||{};
+    lgSay(`Found <b>${ls.length}</b> league${ls.length===1?"":"s"}. Pick the one you're drafting.`,"ok");
+    $("#lgleagues").hidden=false;
+    $("#lgleagues").innerHTML=`<span class="note" style="margin:0">Which league?</span>`+
+      ls.map(l=>`<button class="btng" type="button" data-lid="${l.league_id}">`+
+        `${l.name} <span class="mut">· ${l.total_rosters} teams</span></button>`).join("");
+    $("#lgleagues").querySelectorAll("button").forEach(b=>{
+      b.onclick=()=>lgPick(b.dataset.lid,u.user_id,season);
+    });
+  }catch(e){lgFail(e);}
+  finally{$("#lggo").disabled=false;}
+}
+
+async function lgPick(lid,uid,season){
+  lgSay("Reading your league…");
+  try{
+    const [l,users,rosters,drafts]=await Promise.all([
+      sget("/league/"+lid), sget(`/league/${lid}/users`),
+      sget(`/league/${lid}/rosters`), sget(`/league/${lid}/drafts`)]);
+    if(!l){lgSay("That league came back empty. Try Connect again.","err");return;}
+    const teams=Number(l.total_rosters)||12;
+    const {repl,starters}=lgRepl(l.roster_positions,teams);
+    const dr=(drafts||[]).slice().sort((a,b)=>(b.season||"").localeCompare(a.season||""))[0]||null;
+    // draft_order maps a user to the slot he picks from in odd rounds, which is
+    // the one number the snake arithmetic needs.
+    let slot=null;
+    if(dr&&dr.draft_order&&dr.draft_order[uid]!=null)slot=Number(dr.draft_order[uid]);
+    const names={};
+    (users||[]).forEach(u=>{names[u.user_id]=(u.metadata&&u.metadata.team_name)||u.display_name||"Team";});
+    MEM.league={league_id:lid,name:l.name,teams,repl,starters,user_id:uid,season,
+      draft_id:dr?dr.draft_id:null,draft_status:dr?dr.status:null,
+      scoring:l.scoring_settings||null,slots:l.roster_positions||[],
+      owners:names,
+      rosters:(rosters||[]).map(r=>({owner:r.owner_id,rid:r.roster_id,players:r.players||[]}))};
+    if(slot){MEM.slot=slot;$("#lgslot").value=String(slot);}
+    MEM.teams=teams; $("#lgteams").value=String(teams);
+    saveMem();
+    lgFacts();
+    lgSay(`Linked to <b>${l.name}</b>. Replacement level is now `+
+      `${["QB","RB","WR","TE"].map(p=>p+repl[p]).join(", ")} — every value on the board `+
+      `is measured against those men.`+
+      (slot?` You pick <b>${slot}${slot===1?"st":slot===2?"nd":slot===3?"rd":"th"}</b> of ${teams}.`
+           :` Sleeper hasn't set the draft order yet, so type your slot in the box above `+
+             `when you know it.`)+
+      lgScoringWarn(l.scoring_settings),"ok");
+    dftRefresh(); bigRefresh(); refresh();
+  }catch(e){lgFail(e);}
+}
+
+function ord(n){return n+(n===1?"st":n===2?"nd":n===3?"rd":"th");}
+function lgFacts(){
+  const lg=MEM.league;
+  $("#lgconnect").hidden=false;
+  $("#lgleagues").hidden=true;
+  $("#lgcard").classList.toggle("linked",!!lg);
+  if(!lg){$("#lgfacts").hidden=true;$("#lgactions").hidden=true;$("#lgroster").hidden=true;return;}
+  const f=[["League",lg.name],["Teams",lg.teams],
+    ["You pick",MEM.slot?ord(MEM.slot):"—"],
+    ["Replacement",["QB","RB","WR","TE"].map(p=>p+lg.repl[p]).join(" · ")]];
+  if(lg.draft_id)f.push(["Draft",lg.draft_status==="complete"?"finished"
+    :lg.draft_status==="in_progress"?"running now":"not started"]);
+  $("#lgfacts").hidden=false;
+  $("#lgfacts").innerHTML=f.map(([k,v])=>`<div class="f"><span>${k}</span><b>${v}</b></div>`).join("")+
+    (LIVE.on?`<div class="f"><span>Live</span><b class="live"><i></i>following</b></div>`:"");
+  $("#lgactions").hidden=false;
+  $("#lglive").disabled=!lg.draft_id;
+  $("#lglive").textContent=LIVE.on?"Stop following":"Follow the draft";
+  $("#lglive").setAttribute("aria-pressed",String(LIVE.on));
+}
+
+/* Everyone's roster. Sleeper stores rosters as bare player ids, and the id->name
+   map is a 10MB download this page has no business making. The draft picks carry
+   both the id and the name, so linking a league whose draft has happened teaches
+   the page the names it needs and they are kept in local storage from then on.
+   Anything still unknown renders as a greyed id rather than being dropped, so the
+   count of players on a roster is always honest. */
+function lgName(id){
+  const n=MEM.names&&MEM.names[id];
+  return n?n:`<span class="mut">#${id}</span>`;
+}
+async function lgRosters(show){
+  const lg=MEM.league, box=$("#lgroster");
+  if(!lg||!show){box.hidden=true;return;}
+  box.hidden=false;
+  const known=Object.keys(MEM.names||{}).length;
+  if(!known&&lg.draft_id){box.innerHTML=`<div class="t">Fetching names…</div>`;
+    await lgLearnNames(lg.draft_id);}
+  box.innerHTML=(lg.rosters||[]).map(r=>{
+    const me=r.owner===lg.user_id;
+    const who=lg.owners[r.owner]||"Empty team";
+    const li=(r.players||[]).map(p=>`<li>${lgName(p)}</li>`).join("")
+      ||`<li class="mut">nobody yet</li>`;
+    return `<div class="t${me?" me":""}"><h4>${who}${me?" · you":""} `+
+      `<span class="mut">(${(r.players||[]).length})</span></h4><ul>${li}</ul></div>`;
+  }).join("")||`<div class="t">No rosters yet.</div>`;
+  if(!Object.keys(MEM.names||{}).length)
+    lgSay(`Rosters are showing as ids because nobody has been drafted yet — the names `+
+      `arrive with the picks.`,"");
+}
+async function lgLearnNames(did){
+  try{
+    const picks=await sget(`/draft/${did}/picks`)||[];
+    MEM.names=MEM.names||{};
+    picks.forEach(p=>{
+      const m=p.metadata||{};
+      if(p.player_id&&m.first_name)MEM.names[p.player_id]=`${m.first_name} ${m.last_name||""}`.trim();
+    });
+    saveMem();
+  }catch(e){/* names are a nicety; the board works without them */}
+}
+
+/* --- following the draft --------------------------------------------------
+   Poll, do not stream: Sleeper has no push feed and asks for under a thousand
+   calls a minute. Every eight seconds is two orders of magnitude inside that and
+   still faster than a room can pick.
+
+   Matching is by name, not by id, because the pick payload carries both and the
+   name is the half this page already knows. nkey() folds off the punctuation and
+   the Jr. so that "Marvin Harrison Jr." and "Marvin Harrison" are one man.
+   Anything that fails to match is counted and reported rather than silently
+   skipped -- an unmatched pick means a player who stays on your board after he
+   is gone, which is the worst way for this to be wrong. */
+function liveStop(){
+  LIVE.on=false; clearInterval(LIVE.timer); LIVE.timer=null;
+  lgFacts(); dftRefresh();
+}
+function liveStart(){
+  const lg=MEM.league;
+  if(!lg||!lg.draft_id){lgSay("No draft on that league yet.","err");return;}
+  LIVE.on=true; LIVE.draft=lg.draft_id; LIVE.fails=0;
+  lgFacts();
+  livePoll();
+  LIVE.timer=setInterval(livePoll,8000);
+}
+async function livePoll(){
+  if(!LIVE.on)return;
+  const lg=MEM.league;
+  try{
+    const picks=await sget(`/draft/${LIVE.draft}/picks`)||[];
+    LIVE.fails=0;
+    let added=0, missed=0;
+    MEM.names=MEM.names||{};
+    picks.forEach(p=>{
+      const m=p.metadata||{};
+      if(p.player_id&&m.first_name)MEM.names[p.player_id]=`${m.first_name} ${m.last_name||""}`.trim();
+      const pos=String(m.position||"").toUpperCase();
+      if(!ORDER.includes(pos))return;                 // kickers and defences aren't on this board
+      const k=pos+"|"+nkey(`${m.first_name||""} ${m.last_name||""}`);
+      if(!DKEYS.has(k)){missed++;return;}
+      if(!TAKEN.has(k)){TAKEN.add(k);added++;}
+      if(lg&&p.picked_by&&p.picked_by===lg.user_id)MINE.add(k);
+    });
+    memBoard();
+    const done=picks.length;
+    lgSay(`<span class="live"><i></i>Following your draft.</span> ${done} pick`+
+      `${done===1?"":"s"} in, ${TAKEN.size} off this board`+
+      (missed?`, ${missed} the board doesn't rank`:"")+`.`,"ok");
+    if(added||done!==LIVE.seen.size){LIVE.seen=new Set(picks.map(p=>p.pick_no));dftRefresh();}
+  }catch(e){
+    LIVE.fails++;
+    if(LIVE.fails>=3){liveStop();lgFail(e);}
+  }
+}
+
+function lgDrop(){
+  liveStop();
+  MEM.league=null; MEM.teams=null; MEM.slot=null;
+  saveMem();
+  $("#lgteams").value=""; $("#lgslot").value="";
+  $("#lgroster").hidden=true; $("#lgrosters").setAttribute("aria-pressed","false");
+  lgFacts();
+  lgSay("Unlinked. The board is back on its own 12-team half-PPR default.","");
+  dftRefresh(); bigRefresh(); refresh();
 }
 
 /* --- boot ---------------------------------------------------------------- */
@@ -3132,7 +3863,45 @@ $("#dftpull").value=String(dftPull);
 $("#dftpull").onchange=e=>{dftPull=Number(e.target.value);dftRefresh();};
 $("#dftsearch").oninput=dftRefresh;
 $("#dfthide").onchange=e=>{dftHide=e.target.checked;dftRefresh();};
-$("#dftclear").onclick=()=>{TAKEN.clear();dftRefresh();};
+$("#dftclear").onclick=()=>{TAKEN.clear();MINE.clear();memBoard();dftRefresh();};
+/* Draft-day mode is a class on the section and nothing else -- every rule that
+   makes it big lives in the stylesheet, so nothing about which players are on
+   the board changes when you turn it on. */
+$("#ddaybtn").onclick=()=>{
+  const on=!$("#draft").classList.contains("dday");
+  $("#draft").classList.toggle("dday",on);
+  $("#ddaybtn").setAttribute("aria-pressed",String(on));
+  $("#ddaybtn").textContent=on?"Back to the full page":"Draft-day mode";
+  MEM.ui=MEM.ui||{}; MEM.ui.dday=on; saveMem();
+};
+if(MEM.ui&&MEM.ui.dday){
+  $("#draft").classList.add("dday");
+  $("#ddaybtn").setAttribute("aria-pressed","true");
+  $("#ddaybtn").textContent="Back to the full page";
+}
+$("#lggo").onclick=lgConnect;
+$("#lguser").onkeydown=e=>{if(e.key==="Enter")lgConnect();};
+$("#lgslot").onchange=e=>{
+  const v=Number(e.target.value);
+  MEM.slot=(v>=1&&v<=32)?v:null; saveMem(); lgFacts(); dftRefresh();
+};
+$("#lgteams").onchange=e=>{
+  const v=Number(e.target.value);
+  MEM.teams=(v>=4&&v<=20)?v:null;
+  if(MEM.league&&MEM.teams)MEM.league.teams=MEM.teams;
+  saveMem(); lgFacts(); dftRefresh(); bigRefresh(); refresh();
+};
+$("#lglive").onclick=()=>{LIVE.on?liveStop():liveStart();};
+$("#lgrosters").onclick=()=>{
+  const on=$("#lgrosters").getAttribute("aria-pressed")!=="true";
+  $("#lgrosters").setAttribute("aria-pressed",String(on));
+  lgRosters(on);
+};
+$("#lgdrop").onclick=lgDrop;
+if(MEM.slot)$("#lgslot").value=String(MEM.slot);
+if(MEM.teams)$("#lgteams").value=String(MEM.teams);
+lgFacts();
+if(MEM.league)lgSay(`Still linked to <b>${MEM.league.name}</b> from last time.`,"");
 dftHeader();
 buildTabs();
 loadBoard(POS);
