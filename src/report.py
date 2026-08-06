@@ -2762,12 +2762,36 @@ function bigTeams(){
   for(const p of ORDER){const t=(SITE.boards[p].ratings_meta||{}).teams; if(t)return t;}
   return 12;
 }
-/* Overall pick, averaged over whichever sites price him. Overall pick and not a
-   positional rank because that is the only ADP unit that means the same thing at
-   every position -- QB12 and RB12 are nowhere near each other on a draft board. */
-function overallPick(x){
-  const v=Object.values(x.adp_picks||{}).filter(n=>n!=null);
-  return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;
+/* Overall pick, averaged over whichever sites really price him. Overall pick and
+   not a positional rank because that is the only ADP unit that means the same
+   thing at every position -- QB12 and RB12 are nowhere near each other on a
+   draft board.
+
+   Past about pick 169 the sites stop ranking and start parking: ESPN puts 58
+   different players at exactly 170, Underdog runs on to 215, FFC to 170.8. Those
+   are placeholders for "we don't rank him", not prices, and averaging one in
+   drags a man later than anybody actually drafts him -- Cooper Kupp reads 191
+   with them in and 151 with them out. So the average is taken over the sites
+   below that line, and the parked numbers are only fallen back on when no site
+   is below it. src/draftboard.py fits against the same cut, so the page and the
+   fit now quote the same price for the same man. */
+const PARKED_AT=169;
+function pickPair(x){
+  const all=Object.values(x.adp_picks||{}).filter(n=>n!=null);
+  const real=all.filter(n=>n<PARKED_AT);
+  const use=real.length?real:all;
+  return {pick:use.length?use.reduce((a,b)=>a+b,0)/use.length:null,
+          parked:all.length>0&&real.length===0};
+}
+function overallPick(x){return pickPair(x).pick;}
+/* A parked price is shown, but greyed, because "roughly 170th" is still more use
+   than a dash when you are deciding whether he is worth a bench spot. */
+function pickCell(r){
+  if(r.pick==null)return '<span class="mut">—</span>';
+  if(!r.parked)return String(Math.round(r.pick));
+  return `<span class="mut" title="No site really ranks him this deep — this is `+
+    `where they park players they have stopped ranking, so read it as 'undrafted' `+
+    `rather than as a price">${Math.round(r.pick)}</span>`;
 }
 function bigRows(){
   const out=[];
@@ -2776,7 +2800,8 @@ function bigRows(){
     const priced=qs.map(x=>({x,p:projIn(x,ctx)})).sort((a,b)=>b.p-a.p);
     const ri=Math.min(replIndex(pos),Math.max(0,priced.length-1));
     const repl=priced.length?priced[ri].p:0;
-    priced.forEach(r=>out.push({pos,x:r.x,proj:r.p,vor:r.p-repl,repl,pick:overallPick(r.x)}));
+    priced.forEach(r=>{const pk=pickPair(r.x);
+      out.push({pos,x:r.x,proj:r.p,vor:r.p-repl,repl,pick:pk.pick,parked:pk.parked});});
   });
   out.sort((a,b)=>b.vor-a.vor);
   out.forEach((r,i)=>{r.rank=i+1; r.edge=r.pick==null?null:r.pick-r.rank;});
@@ -2831,15 +2856,16 @@ function bigRefresh(){
       <td class="qb"><span class="pc ${r.pos}">${r.pos}</span> <b>${r.x.name}</b>${teamCell(r.x.team)}</td>
       <td class="num">${fmt(r.proj,1)}</td>
       <td class="num vor${r.vor<0?" neg":""}">${r.vor>0?"+":""}${fmt(r.vor,1)}</td>
-      <td class="num">${r.pick==null?'<span class="mut">—</span>':Math.round(r.pick)}</td>
+      <td class="num">${pickCell(r)}</td>
       <td class="rd ${ecls}">${eword}</td></tr>`;
   }).join("")||`<tr><td colspan="6" class="note">Nobody matches that search.</td></tr>`;
 
   $("#bigbody").querySelectorAll("tr.row").forEach(tr=>tr.onclick=()=>
     jumpTo(tr.dataset.bpos,tr.dataset.id));
   $("#bignote").textContent=`${rows.length} players across ${ORDER.join(", ")}. `+
-    `Projections are per game. Market pick is the average overall pick across the sites in this file, `+
-    `so a player nobody prices shows a dash rather than a guess.`;
+    `Projections are per game. Market pick is the average overall pick across the sites that `+
+    `really rank him, so a player nobody prices shows a dash rather than a guess, and a grey `+
+    `number means the sites have parked him rather than priced him.`;
 }
 /* Row click on the big board: open him where the full breakdown lives. */
 function jumpTo(pos,id){
@@ -2863,32 +2889,58 @@ $("#bigsearch").oninput=bigRefresh;
    so the same points over replacement buy you less at the thin end of the
    roster. Uncorrected, this board took tight ends thirty-two picks early.
 
-   The correction is one number per position, in SEASON points, fitted at build
-   time by src/draftboard.py and carried in SITE.draft.premium. Two things about
-   it that are easy to get wrong:
+   The correction is TWO numbers per position, fitted at build time by
+   src/draftboard.py and carried in SITE.draft:
 
-     * it is in season points and everything here is per game, so it is divided
-       by SITE.draft.full (17) before it is used; and
-     * it is FADED by the dial rather than refitted at each setting --
-       premium(w) = (1-w) * premium(0). Refitting per notch is defensible and
-       was tried; it gave tight ends -12 at one setting and -3 at the next,
-       because the objective is a step function and the search lands in a
-       different basin each time. The faded version has the right end points,
-       moves smoothly, and picks 47-48 of the same top 48 players.
+       draft value = slope[pos] x (points over replacement) + premium[pos]
+
+   A premium on its own was shipped first and could not do the job. A premium
+   moves a whole position up or down the board; it cannot make a position's top
+   FLATTER, because it lifts that position's first man and its twelfth by the
+   same amount. Flattening is what the quarterbacks needed: our QB1 sat 85
+   season points clear of our QB12 and history says that gap is worth nearer
+   nothing, so any constant big enough to pull the first one back to where the
+   room takes him shoved the twelfth one down near pick 90. The slope is the
+   part that fixes shape. Quarterbacks came out at 0.60; the other three came
+   out at 1.00, 0.90 and 1.00, which is to say they were already right.
+
+   Two things about the units that are easy to get wrong:
+
+     * the premium is in SEASON points and everything here is per game, so it is
+       divided by SITE.draft.full (17) before it is used. The slope is a ratio,
+       so it needs no conversion and means the same thing in either space; and
+     * both are FADED by the dial rather than refitted at each setting --
+       premium(w) = (1-w) * premium(0) and slope(w) = 1 + (1-w) * (slope(0)-1),
+       so each walks back to "no correction at all" as the dial comes up.
+       Refitting per notch is defensible and was tried; it gave tight ends -12
+       at one setting and -3 at the next, because the objective is a step
+       function and the search lands in a different basin each time. The faded
+       version has the right end points, moves smoothly, and picks 47-48 of the
+       same top 48 players.
 
    The dial itself is Hunter's "blend of pure value and when he'll be gone",
    blended in rank space because that is the unit a draft board is read in.
    ====================================================================== */
-const DRAFT=Object.assign({premium:{},pull:0.15,full:17,fitted:false},SITE.draft||{});
+const DRAFT=Object.assign({premium:{},slope:{},pull:0.15,full:17,fitted:false},SITE.draft||{});
 const PULLWORD={"0":"off","0.15":"Light","0.25":"Moderate","0.35":"Strong","0.5":"Heavy"};
 let dftPull=Number(DRAFT.pull||0), dftPos="ALL", dftHide=false;
 const TAKEN=new Set();                       // in memory only, gone on refresh
 const dkey=r=>r.pos+"#"+r.x.rank;
 
+/* The slope for a position, already faded by the dial. Written out rather than
+   inlined because "1 plus (1-w) times (slope minus 1)" is the one line here that
+   is easy to write as (1-w)*slope by mistake, which would flatten every position
+   to nothing as the dial comes up instead of returning them all to 1. */
+function dftSlope(pos,w){
+  const s=(DRAFT.slope||{})[pos];
+  return 1+(1-w)*((typeof s==="number"?s:1)-1);
+}
 function dftRows(){
   const w=dftPull, full=DRAFT.full||17, prem=DRAFT.premium||{};
   const rows=bigRows();                      // vor here is per game
-  rows.forEach(r=>{r.prem=(1-w)*((prem[r.pos]||0)/full); r.val=r.vor+r.prem;});
+  rows.forEach(r=>{r.slope=dftSlope(r.pos,w);
+    r.prem=(1-w)*((prem[r.pos]||0)/full);
+    r.val=r.slope*r.vor+r.prem;});
   rows.slice().sort((a,b)=>b.val-a.val).forEach((r,i)=>{r.vrank=i+1;});
   // Market rank: everybody priced, in price order, then everybody unpriced behind
   // them -- 9999 and not Infinity, because Infinity minus Infinity is NaN and a
@@ -2903,11 +2955,12 @@ function dftRows(){
 function dftHeader(){
   $("#dfthead").innerHTML=`<tr><th></th><th class="num">#</th><th>Player</th>`+
     `<th class="num">Proj</th>`+
-    `<th class="num" title="Points per game over replacement at his own position, plus the positional premium this board is ranked on">Draft value</th>`+
-    `<th class="num" title="Average overall pick across the sites in this file">Market pick</th>`+
+    `<th class="num" title="Points per game over replacement at his own position, scaled and shifted by this board's positional fit">Draft value</th>`+
+    `<th class="num" title="Average overall pick across the sites that really rank him">Market pick</th>`+
     `<th title="Where the market takes him against where this board takes him">Vs market</th></tr>`;
 }
-/* The premium, in words, at whatever the dial is set to. */
+/* The correction, in words, at whatever the dial is set to. Shape first, because
+   it is the bigger of the two effects and much the less obvious one. */
 function dftPrem(){
   const w=dftPull, prem=DRAFT.premium||{};
   if(!DRAFT.fitted){
@@ -2915,17 +2968,26 @@ function dftPrem(){
       "VORP ranking as it stands.";
     return;
   }
+  const shape=ORDER.map(p=>{const s=dftSlope(p,w);
+      return Math.abs(s-1)<0.02?null:`${p} ${fmt(s*100,0)}%`;}).filter(Boolean);
   const parts=ORDER.map(p=>{const v=(1-w)*(prem[p]||0);
       return Math.abs(v)<0.5?null:`${p} ${v>0?"+":"−"}${fmt(Math.abs(v),0)}`;}).filter(Boolean);
   const dial=w===0
     ? "The dial is off, so that is the full correction and the board's own order underneath it."
-    : `The dial fades it to ${Math.round((1-w)*100)}% and pulls every player `+
-      `${Math.round(w*100)}% of the way toward his market pick.`;
-  $("#dftprem").innerHTML=(parts.length
-      ? `<strong>Positional correction: ${parts.join(", ")}</strong> season points, `+
-        `measured against the running back — fitted once so each position's top 24 lands `+
-        `where the room takes those same men. `
-      : `<strong>No positional correction needed</strong> at this setting. `)+dial;
+    : `The dial fades both back toward none — ${Math.round((1-w)*100)}% of the way `+
+      `on at this setting — and pulls every player ${Math.round(w*100)}% of the way `+
+      `toward his market pick.`;
+  const one=shape.length
+    ? `<strong>Spread: ${shape.join(", ")}</strong> of the gap the projection puts `+
+      `between that position's best man and his replacement — the room prices those `+
+      `tops much closer to the middle than we do, and six years of draft slots agree. `
+    : "";
+  const two=parts.length
+    ? `<strong>Positional shift: ${parts.join(", ")}</strong> season points, measured `+
+      `against the running back — fitted so each position's top 4, 8, 16 and 24 all `+
+      `land where the room takes those same men. `
+    : `<strong>No positional shift needed</strong> at this setting. `;
+  $("#dftprem").innerHTML=one+two+dial;
 }
 /* Best available at each position, which is the one thing you actually look at
    with the clock running. Ignores the search box and the position filter on
@@ -2962,16 +3024,19 @@ function dftRefresh(){
       :r.edge<=-teams?`<span class="vt r">▼ goes ${Math.round(-r.edge)} picks earlier</span>`
       :`<span class="mut">about where he's drafted</span>`;
     const k=dkey(r), gone=TAKEN.has(k);
-    const ptitle=Math.abs(r.prem)<0.005?""
-      : ` title="${fmt(r.vor,1)} over replacement ${r.prem>0?"+":"−"} `+
-        `${fmt(Math.abs(r.prem),2)} ${r.pos} premium"`;
+    const flat=Math.abs(r.slope-1)<0.005, shift=Math.abs(r.prem)<0.005;
+    const ptitle=(flat&&shift)?""
+      : ` title="${fmt(r.vor,1)} over replacement`+
+        (flat?"":` × ${fmt(r.slope,2)} ${r.pos} spread`)+
+        (shift?"":` ${r.prem>0?"+":"−"} ${fmt(Math.abs(r.prem),2)} ${r.pos} shift`)+
+        `"`;
     return bar+`<tr class="row${gone?" gone":""}" data-bpos="${r.pos}" data-id="${r.x.rank}" data-k="${k}">
       <td class="tkc"><button class="tk" type="button" title="${gone?"Put him back":"Cross him off"}">${gone?"↺":"✓"}</button></td>
       <td class="rank num">${r.rank}</td>
       <td class="qb"><span class="pc ${r.pos}">${r.pos}</span> <b>${r.x.name}</b>${teamCell(r.x.team)}</td>
       <td class="num">${fmt(r.proj,1)}</td>
       <td class="num vor${r.val<0?" neg":""}"${ptitle}>${r.val>0?"+":""}${fmt(r.val,1)}</td>
-      <td class="num">${r.pick==null?'<span class="mut">—</span>':Math.round(r.pick)}</td>
+      <td class="num">${pickCell(r)}</td>
       <td class="rd ${ecls}">${eword}</td></tr>`;
   }).join("")||`<tr><td colspan="7" class="note">Nobody matches that.</td></tr>`;
 

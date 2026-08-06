@@ -64,22 +64,77 @@ WHAT THE SIMULATION SAID, INCLUDING THE PART THAT WENT AGAINST ME
   clear, so its magnitudes do not transfer, and applying them raw drops the
   first quarterback to pick 36. The size is fitted here, on our own numbers.
 
-HOW THE NUMBER IS FITTED
+WHY A PREMIUM ALONE WAS NOT ENOUGH  (Hunter: "Josh Allen still seems high")
 
-  One premium per position, in season points, added to points over replacement.
-  Chosen by coordinate descent to minimise, jointly:
+  The first version of this fitted ONE number per position and scored itself on
+  the median gap over each position's top 24. Both halves of that were wrong,
+  and the quarterbacks are where it showed.
 
-    TIMING  the median gap between where our board puts a position's top 24 and
-            where the room puts those same 24 men, summed over positions; and
+  A MEDIAN CANNOT SEE SHAPE. Quarterback's median over its top 24 came out one
+  pick late -- fixed, apparently -- while its top EIGHT was still thirteen picks
+  early, because being early at the top and late in the teens nets to nothing in
+  the middle. Tight end read as one and a half picks late over its top 24 and
+  nineteen and a half picks early over its top 8. So timing is now measured at
+  the top 4, 8, 16 and 24 of each position. Those sets are nested, so a man in
+  his position's top four is counted four times and the top of the board carries
+  the weight it deserves.
+
+  A CONSTANT CANNOT FLATTEN A POSITION. It lifts a position's first and its
+  twelfth by the same amount, so the only way to move Allen from ninth overall
+  to where the room takes him was a discount so large it buried the twelfth
+  quarterback fifty picks past his price. Each position therefore also gets a
+  SLOPE, and its board value is  slope x VOR + premium.
+
+  AND THE MIX WAS COUNTED IN THE WRONG UNIT. Being one quarterback ahead of the
+  room inside the first 24 picks is a quarter of the picks made so far; being
+  one ahead inside 168 is under four percent. The old objective added both raw
+  and so weighed them the same. Errors are now per round -- 12 x wrong / depth.
+
+WHAT THE SLOPE CAME OUT AT, AND THE CHECK THAT IT IS NOT JUST CURVE-FITTING
+
+  Fitted against the room: QB 0.60, RB 1.00 (the anchor), WR 0.90, TE 1.00. Read
+  that as: our quarterback spread is about 40% too wide and the other three are
+  right. It is stable -- the quarterback slope sits between 0.55 and 0.65 for
+  every roster-shape weight from 1 to 8, and the whole solution is unchanged
+  across 2 to 4, which is why the weight is 3.
+
+  Then measured independently, with no market input at all: take the preseason
+  consensus rank 2020-2025 as a SLOT, score what the man drafted there actually
+  returned under this league's rules, and compare it with our own VOR, band for
+  band. Least squares through the origin over the first twelve slots gives
+
+      QB 0.10 (-0.48 to 0.68)   RB 0.91 (0.74 to 1.07)
+      WR 0.85 ( 0.50 to 1.21)   TE 0.94 (0.62 to 1.26)
+
+  Same verdict, from six years of realised points instead of from ADP: three
+  positions right, quarterback far too steep. The number behind it is blunt --
+  the top three quarterback slots returned 4 points LESS than the QB10-14 slots
+  over those six years, against the 52 our board pays for them. The fitted 0.60
+  is well inside that interval and much the more conservative of the two, which
+  is deliberate: six years is six draws, and the market is not the only thing
+  that can be wrong.
+
+HOW THE NUMBERS ARE FITTED
+
+  A slope and a premium per position, by coordinate descent, minimising:
+
+    TIMING  the median gap between where our board puts a position's top 4 / 8 /
+            16 / 24 and where the room puts those same men, averaged over the
+            four depths and summed over positions; and
     MIX     how far our positional mix inside the top 12/24/36/48/72/96/120/168
-            is from the room's, weighted half again as heavily so timing cannot
-            be bought at the cost of drafting the wrong shape of roster.
+            is from the room's, per round, weighted three times as heavily so
+            timing cannot be bought at the cost of the wrong shape of roster.
 
   Zero gap does NOT mean agreeing with the market. It means agreeing about WHEN
   quarterbacks go while disagreeing freely about WHICH quarterback -- which is
-  the whole point. Running back is pinned at zero, because only the differences
-  between positions can change a ranking, and that makes the other three
-  readable as premiums and discounts against the back.
+  the whole point, and it is why tight end still comes out taking Kelce, Kittle
+  and Pitts fifty picks before the room will: the room has written off three
+  veterans, and that is a disagreement about men, not about timing.
+
+  Running back is pinned at premium 0 and slope 1. Only the differences between
+  positions can change a ranking, and scaling every position at once changes
+  nothing, so without an anchor the search wanders; pinning the back also makes
+  the other three readable as premiums and discounts against him.
 """
 from __future__ import annotations
 
@@ -97,12 +152,23 @@ DEPTHS = (12, 24, 36, 48, 72, 96, 120, 168)
 # the bounds are a guard rail and not a constraint.
 GRID = np.arange(-90.0, 91.0, 1.0)
 
-# How heavily the shape of the roster counts against the timing of the picks.
-MIX_WEIGHT = 1.5
+# The slope is fitted over this range. Below 0.4 a position stops being ranked
+# by our own opinion of it at all, and above 1.2 the fit would be claiming our
+# spread is too NARROW, which nothing measured has ever suggested.
+SLOPE_GRID = np.round(np.arange(0.40, 1.201, 0.05), 2)
 
-# How many of each position's own men the timing is measured over. Two rounds'
-# worth of that position, which is everybody you would realistically consider.
-TOP_N = 24
+# How heavily the shape of the roster counts against the timing of the picks.
+# Both terms are in draft picks now, so this is readable: a player in the wrong
+# position bucket costs three times a pick of bad timing. The whole solution is
+# unchanged anywhere from 2 to 4.
+MIX_WEIGHT = 3.0
+
+# How deep into each position the timing is measured. Nested on purpose: a man
+# in his position's top four is inside all four sets and so counts four times.
+# The old version used the median of the top 24 alone and that is exactly what
+# let the quarterbacks stay thirteen picks early while reading as fixed.
+TIMING_DEPTHS = (4, 8, 16, 24)
+TOP_N = TIMING_DEPTHS[-1]
 
 # Where the dial starts: a light pull toward the room. Hunter asked for "a blend
 # of pure value and when he'll be gone", and this is the blend -- 0 is the
@@ -144,16 +210,24 @@ def _rows(boards: dict) -> tuple:
 
 
 def premiums(boards: dict, positions=None) -> dict:
-    """Fit one season-points premium per position. Running back is the zero.
+    """Fit a slope and a season-points premium per position, against the room.
+
+    A position's draft value is  slope[p] * VOR + premium[p], with the running
+    back pinned at slope 1 and premium 0. The premium moves a whole position up
+    or down the board; the slope decides how far its first man sits above its
+    twelfth, which is the part a premium cannot touch and the part the
+    quarterbacks needed.
 
     `boards` is render_site's by-position dict of finished boards. Returns a
     block the page can carry as-is; on anything it can't fit (one position, no
-    market prices at all) it returns zeros, which makes the draft board fall
-    back to exactly the VORP ranking rather than to nonsense.
+    market prices at all) it returns a neutral block -- slope 1, premium 0 --
+    which makes the draft board fall back to exactly the VORP ranking rather
+    than to nonsense.
     """
     full = float(config.LEAGUE.get("games_per_season", 17)) or 17.0
     order = tuple(positions or boards.keys())
-    blank = {"premium": {p: 0.0 for p in order}, "pull": DEFAULT_PULL,
+    blank = {"premium": {p: 0.0 for p in order},
+             "slope": {p: 1.0 for p in order}, "pull": DEFAULT_PULL,
              "full": full, "fitted": False, "gap": {}, "mix": {}}
 
     pos, vor, pick = _rows(boards)
@@ -172,50 +246,73 @@ def premiums(boards: dict, positions=None) -> dict:
     mo = np.argsort(mkt)
     target = np.array([np.bincount(pidx[mo[:N]], minlength=k) for N in DEPTHS])
 
-    def rank_of(adj: np.ndarray) -> np.ndarray:
+    masks = [pidx == j for j in range(k)]
+
+    def rank_of(slope: np.ndarray, adj: np.ndarray) -> np.ndarray:
         r = np.empty(n)
-        r[np.argsort(-(vor + adj[pidx]))] = np.arange(1, n + 1)
+        r[np.argsort(-(slope[pidx] * vor + adj[pidx]))] = np.arange(1, n + 1)
         return r
 
-    def cost(adj: np.ndarray) -> float:
-        r = rank_of(adj)
+    def cost(slope: np.ndarray, adj: np.ndarray) -> float:
+        r = rank_of(slope, adj)
         timing = 0.0
         for j in range(k):
-            m = pidx == j
+            m = masks[j]
             if not m.any():
                 continue
-            take = np.argsort(r[m])[:TOP_N]
-            timing += abs(float(np.median(mkt[m][take]) - np.median(r[m][take])))
+            o = np.argsort(r[m])
+            for d in TIMING_DEPTHS:
+                t = o[:d]
+                timing += abs(float(np.median(mkt[m][t]) - np.median(r[m][t])))
+        timing /= len(TIMING_DEPTHS)
         o = np.argsort(r)
-        mix = sum(int(np.abs(np.bincount(pidx[o[:N]], minlength=k) - target[i]).sum())
-                  for i, N in enumerate(DEPTHS))
+        mix = 0.0
+        for i, N in enumerate(DEPTHS):
+            wrong = int(np.abs(np.bincount(pidx[o[:N]], minlength=k)
+                               - target[i]).sum())
+            mix += 12.0 * wrong / N          # players per round in the wrong bucket
         return timing + MIX_WEIGHT * mix
 
-    adj = np.zeros(k)
-    best = cost(adj)
-    for _ in range(8):
+    # Coordinate descent over both parameters of every position except the back,
+    # whose slope stays 1 and whose premium is subtracted off at the end. Ten
+    # sweeps is generous; it has never taken more than four to stop moving.
+    anchor = order.index("RB") if "RB" in order else -1
+    slope, adj = np.ones(k), np.zeros(k)
+    best = cost(slope, adj)
+    for _ in range(10):
         moved = False
         for j in range(k):
             keep = adj[j]
             for v in GRID:
                 adj[j] = v
-                c = cost(adj)
+                c = cost(slope, adj)
                 if c < best - 1e-9:
                     best, keep, moved = c, float(v), True
             adj[j] = keep
+            if j == anchor:
+                continue
+            keep = slope[j]
+            for v in SLOPE_GRID:
+                slope[j] = v
+                c = cost(slope, adj)
+                if c < best - 1e-9:
+                    best, keep, moved = c, float(v), True
+            slope[j] = keep
         if not moved:
             break
-    zero = adj[order.index("RB")] if "RB" in order else 0.0
+    zero = adj[anchor] if anchor >= 0 else 0.0
     adj = np.round(adj - zero, 1)
 
-    r = rank_of(adj)
+    r = rank_of(slope, adj)
     gap, mix = {}, {}
     for j, p in enumerate(order):
-        m = pidx == j
+        m = masks[j]
         if not m.any():
             continue
-        take = np.argsort(r[m])[:TOP_N]
-        gap[p] = round(float(np.median(mkt[m][take]) - np.median(r[m][take])), 1)
+        o = np.argsort(r[m])
+        gap[p] = {int(d): round(float(np.median(mkt[m][o[:d]])
+                                     - np.median(r[m][o[:d]])), 1)
+                  for d in TIMING_DEPTHS}
     o, mo = np.argsort(r), np.argsort(mkt)
     for N in (24, 48, 96, 168):
         mix[N] = {"ours": {p: int(np.bincount(pidx[o[:N]], minlength=k)[j])
@@ -223,6 +320,7 @@ def premiums(boards: dict, positions=None) -> dict:
                   "room": {p: int(np.bincount(pidx[mo[:N]], minlength=k)[j])
                            for j, p in enumerate(order)}}
     return {"premium": {p: float(adj[j]) for j, p in enumerate(order)},
+            "slope": {p: round(float(slope[j]), 2) for j, p in enumerate(order)},
             "pull": DEFAULT_PULL, "full": full, "fitted": True,
             "gap": gap, "mix": mix, "n": int(n)}
 
@@ -232,11 +330,20 @@ def describe(block: dict) -> str:
     if not block.get("fitted"):
         return "draft board: no positional fit (falling back to plain VOR)"
     prem = block["premium"]
-    lines = ["draft board -- positional premium, in season points over replacement",
-             "  " + "   ".join(f"{p} {v:+.0f}" for p, v in prem.items()),
-             "  where each position's top 24 lands against the room "
-             "(+ = we take him earlier)",
-             "  " + "   ".join(f"{p} {v:+.1f}" for p, v in block["gap"].items())]
+    slope = block.get("slope") or {}
+    lines = ["draft board -- board value = slope x VOR + premium, running back "
+             "pinned at 1.00 and +0",
+             "  slope    " + "   ".join(f"{p} {slope.get(p, 1.0):.2f}" for p in prem),
+             "  premium  " + "   ".join(f"{p} {v:+.0f}" for p, v in prem.items())
+             + "   season points",
+             "  where each position's top N lands against the room "
+             "(+ = we take him earlier)"]
+    depths = sorted({int(d) for g in block["gap"].values() for d in g}) or [TOP_N]
+    lines.append("  " + " ".join(f"{'top ' + str(d):>10}" for d in depths))
+    for p, g in block["gap"].items():
+        g = g if isinstance(g, dict) else {TOP_N: g}
+        lines.append(f"  {p:<4}" + " ".join(
+            f"{g.get(d, g.get(str(d), 0.0)):>+9.1f}" for d in depths))
     for N, m in block["mix"].items():
         ours = " ".join(f"{p}{m['ours'][p]}" for p in prem)
         room = " ".join(f"{p}{m['room'][p]}" for p in prem)
