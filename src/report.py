@@ -17,9 +17,15 @@ before any of them existed.
 The tab bar is built in the browser from the boards actually present:
 
   QB Rankings / RB Rankings / ...  -- one per position, in the order given.
-  Big Board                        -- everybody at once, ranked on points over
-                                      replacement, because 17 pts/gm means
-                                      something different at each position.
+  Big Board                        -- the draft board: where each man actually
+                                      goes, value adjusted for the fact that you
+                                      start one quarterback and three backs.
+                                      See src/draftboard.py for the correction.
+  VORP Rankings                    -- everybody at once, ranked on points over
+                                      replacement and nothing else, because 17
+                                      pts/gm means something different at each
+                                      position. The value board the draft board
+                                      is built out of.
   How it works                     -- ONE shared tab. It explains whichever
                                       position you're looking at and carries its
                                       own position switcher, rather than each
@@ -120,6 +126,11 @@ def render_site(boards, meta: dict | None = None) -> str:
         # import -- a caller holding a saved board and no data folder still gets
         # a page, just without the outside yardstick on it.
         "team_env": _team_env(),
+        # The positional premium the draft-board tab is ranked on. Same deal as
+        # team_env: computed here, swallowed on failure, and its absence costs
+        # you the correction and not the page -- with no block the draft board
+        # falls back to exactly the VORP ranking.
+        "draft": _draft_block(by_pos, order),
     }
     # Data last, and by a token no player name can contain: the JSON carries
     # names and free text, and any string replacement run after it is injected
@@ -137,6 +148,20 @@ def _team_env() -> dict:
     try:
         from . import team_env
         return team_env.for_site()
+    except Exception:
+        return {}
+
+
+def _draft_block(by_pos: dict, order) -> dict:
+    """The fitted positional premium, or an empty block if it can't be fitted.
+
+    Swallows everything, for the same reason _team_env does: the draft board is
+    a second reading of a page that has to render either way. With no block the
+    browser uses zeros, which makes that tab the VORP ranking rather than junk.
+    """
+    try:
+        from . import draftboard
+        return draftboard.premiums(by_pos, order)
     except Exception:
         return {}
 
@@ -604,13 +629,39 @@ _TEMPLATE = r"""<!DOCTYPE html>
     border-radius:6px;color:#fff;margin-right:8px;min-width:26px;text-align:center;vertical-align:1px}
   .pc.QB{background:#184f95}.pc.RB{background:#0f6b46}.pc.WR{background:#8a4b12}
   .pc.TE{background:#6b2f8a}.pc.K,.pc.DST{background:#52514e}
-  #bigtbl .vor{font-variant-numeric:tabular-nums;font-weight:700}
-  #bigtbl .vor.neg{color:var(--muted);font-weight:400}
-  #bigtbl td.rd{color:var(--muted);font-size:12px;white-space:nowrap}
+  #bigtbl .vor,#dfttbl .vor{font-variant-numeric:tabular-nums;font-weight:700}
+  #bigtbl .vor.neg,#dfttbl .vor.neg{color:var(--muted);font-weight:400}
+  #bigtbl td.rd,#dfttbl td.rd{color:var(--muted);font-size:12px;white-space:nowrap}
   /* Round dividers. On a cross-position board the useful unit isn't the tier,
      it's "am I still in round 3" -- so the rounds get ruled off. */
   tr.rdsep td{background:var(--plane);color:var(--ink-2);font-size:11.5px;font-weight:700;
     letter-spacing:.06em;text-transform:uppercase;padding:7px 12px;border-top:1px solid var(--baseline)}
+
+  /* --- the draft board ---------------------------------------------------
+     Same table, one extra job: it has to survive being read at speed while
+     somebody else is on the clock. So the only new furniture is a way to cross
+     a man off and a strip that says who is left. */
+  .tk{appearance:none;border:1px solid var(--border);background:var(--plane);color:var(--ink-2);
+    cursor:pointer;font:inherit;font-size:11px;font-weight:800;line-height:1;
+    border-radius:7px;padding:5px 7px;transition:background .12s,color .12s,border-color .12s}
+  .tk:hover{color:var(--ink);border-color:var(--accent)}
+  #dfttbl td.tkc{width:38px;padding-right:0}
+  /* A player who is gone is not deleted -- you still want to see where he went
+     and what the run around him did to the board. He just stops competing for
+     your eye. */
+  #dfttbl tr.gone td{opacity:.4}
+  #dfttbl tr.gone .nm{text-decoration:line-through}
+  #dfttbl tr.gone .tk{background:var(--accent);color:#fff;border-color:var(--accent);opacity:1}
+  /* Best available. Four cards, one per position, and the only thing on the
+     page you can read without reading: on the clock you want "who is the best
+     back left" answered before you have finished asking it. */
+  .bav{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .bav .b{flex:1 1 150px;border:1px solid var(--border);border-radius:11px;
+    padding:9px 12px;background:var(--plane)}
+  .bav .b .l{font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--muted);
+    text-transform:uppercase}
+  .bav .b .n{font-size:14.5px;font-weight:700;margin-top:3px;line-height:1.25}
+  .bav .b .s{font-size:11.5px;color:var(--muted);margin-top:2px}
   /* Long-standing gap: .mut was already being written into cells for "there is
      no number here" and had no rule, so a dash meant to recede read as data. */
   .mut{color:var(--muted)}
@@ -1039,7 +1090,42 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <p class="note" id="rnote"></p>
   </section>
 
-  <!-- The combined board. Everyone from every position in one ranking. -->
+  <!-- The draft board. Not "what is he worth" but "when do I take him", which is
+       a different question and needs the positional correction in draftboard.py. -->
+  <section id="draft">
+    <div class="card">
+      <h2>The draft board</h2>
+      <p>Where each man actually goes. It starts from points over replacement — the
+      VORP Rankings tab — and then fixes the thing that ranking gets wrong on draft day:
+      <strong>you start one quarterback and one tight end, but two or three backs and
+      receivers</strong>, so the same points over replacement are not worth the same at
+      every position. Left uncorrected this board took tight ends
+      <strong>thirty-two picks too early</strong>.</p>
+      <p class="note" id="dftprem" style="margin-top:10px"></p>
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label class="note" style="margin:0">Pull toward the room&nbsp;
+          <select class="sortsel" id="dftpull">
+            <option value="0">None — our board only</option>
+            <option value="0.15">Light</option>
+            <option value="0.25">Moderate</option>
+            <option value="0.35">Strong</option>
+            <option value="0.5">Heavy</option>
+          </select></label>
+        <div class="seg" id="dftpos" role="group"></div>
+        <input class="search" id="dftsearch" type="search" placeholder="Search…" aria-label="Search the draft board">
+        <label class="note" style="margin:0"><input type="checkbox" id="dfthide"> Hide who's gone</label>
+        <button class="tk" id="dftclear" type="button">Reset the board</button>
+      </div>
+      <div class="bav" id="dftbav"></div>
+    </div>
+    <div class="card" style="padding:14px 16px">
+      <div class="tblwrap"><table id="dfttbl"><thead id="dfthead"></thead><tbody id="dftbody"></tbody></table></div>
+    </div>
+    <p class="note" id="dftnote"></p>
+  </section>
+
+  <!-- The value board. Everyone from every position in one ranking, on points over
+       replacement and nothing else. The draft board above is this plus scarcity. -->
   <section id="big">
     <div class="card">
       <h2>One board, every position</h2>
@@ -1048,6 +1134,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
       raw points, is what makes positions comparable: 17 points a game is a middling
       quarterback and a top-three running back, so ranking on the projection alone would
       hand you the first eight rounds of quarterbacks.</p>
+      <p>This is a <strong>value</strong> board, not a draft order — it says what each man is
+      worth, not when to take him. The Big Board tab is this one with positional scarcity
+      priced in, and that is the one to draft off.</p>
       <p class="note" id="bigrepl" style="margin-top:10px"></p>
       <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <label class="note" style="margin:0">Sort&nbsp;
@@ -1193,7 +1282,8 @@ function buildTabs(){
   t.innerHTML=ORDER.map(p=>
       `<button class="tab" role="tab" data-tab="rankings" data-board="${p}">${p} Rankings</button>`).join("")+
     (ORDER.length>1
-      ? `<button class="tab" role="tab" data-tab="big" title="Every position in one ranking, on points over replacement">Big Board</button>`
+      ? `<button class="tab" role="tab" data-tab="draft" title="Where each man actually goes, with positional scarcity priced in">Big Board</button>`+
+        `<button class="tab" role="tab" data-tab="big" title="Every position in one ranking, on points over replacement and nothing else">VORP Rankings</button>`
       : "")+
     `<button class="tab" role="tab" data-tab="overview">How it works</button>`;
   t.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
@@ -1207,6 +1297,7 @@ function showTab(name){
     String(b.dataset.tab===name && (!b.dataset.board || b.dataset.board===POS))));
   document.querySelectorAll(".wrap>section").forEach(s=>s.classList.toggle("active",s.id===name));
   if(name==="big")bigRefresh();
+  if(name==="draft")dftRefresh();
 }
 const root=document.documentElement;
 $("#themeBtn").onclick=()=>{const c=root.getAttribute("data-theme");
@@ -2763,6 +2854,141 @@ function jumpTo(pos,id){
 $("#bigsort").onchange=e=>{bigSort=e.target.value;bigRefresh();};
 $("#bigsearch").oninput=bigRefresh;
 
+/* ==========================================================================
+   THE DRAFT BOARD — the same players, in the order you would actually take them.
+
+   Points over replacement answers "what is he worth". It does not answer "when
+   do I take him", and the gap between those two questions is positional: you
+   start one quarterback and one tight end but two or three backs and receivers,
+   so the same points over replacement buy you less at the thin end of the
+   roster. Uncorrected, this board took tight ends thirty-two picks early.
+
+   The correction is one number per position, in SEASON points, fitted at build
+   time by src/draftboard.py and carried in SITE.draft.premium. Two things about
+   it that are easy to get wrong:
+
+     * it is in season points and everything here is per game, so it is divided
+       by SITE.draft.full (17) before it is used; and
+     * it is FADED by the dial rather than refitted at each setting --
+       premium(w) = (1-w) * premium(0). Refitting per notch is defensible and
+       was tried; it gave tight ends -12 at one setting and -3 at the next,
+       because the objective is a step function and the search lands in a
+       different basin each time. The faded version has the right end points,
+       moves smoothly, and picks 47-48 of the same top 48 players.
+
+   The dial itself is Hunter's "blend of pure value and when he'll be gone",
+   blended in rank space because that is the unit a draft board is read in.
+   ====================================================================== */
+const DRAFT=Object.assign({premium:{},pull:0.15,full:17,fitted:false},SITE.draft||{});
+const PULLWORD={"0":"off","0.15":"Light","0.25":"Moderate","0.35":"Strong","0.5":"Heavy"};
+let dftPull=Number(DRAFT.pull||0), dftPos="ALL", dftHide=false;
+const TAKEN=new Set();                       // in memory only, gone on refresh
+const dkey=r=>r.pos+"#"+r.x.rank;
+
+function dftRows(){
+  const w=dftPull, full=DRAFT.full||17, prem=DRAFT.premium||{};
+  const rows=bigRows();                      // vor here is per game
+  rows.forEach(r=>{r.prem=(1-w)*((prem[r.pos]||0)/full); r.val=r.vor+r.prem;});
+  rows.slice().sort((a,b)=>b.val-a.val).forEach((r,i)=>{r.vrank=i+1;});
+  // Market rank: everybody priced, in price order, then everybody unpriced behind
+  // them -- 9999 and not Infinity, because Infinity minus Infinity is NaN and a
+  // NaN comparator silently scrambles the tail of the board.
+  rows.slice().sort((a,b)=>(a.pick==null?9999:a.pick)-(b.pick==null?9999:b.pick))
+      .forEach((r,i)=>{r.mrank=i+1;});
+  rows.forEach(r=>{r.score=(1-w)*r.vrank+w*r.mrank;});
+  rows.sort((a,b)=>(a.score-b.score)||(a.vrank-b.vrank));
+  rows.forEach((r,i)=>{r.rank=i+1; r.edge=r.pick==null?null:r.pick-r.rank;});
+  return rows;
+}
+function dftHeader(){
+  $("#dfthead").innerHTML=`<tr><th></th><th class="num">#</th><th>Player</th>`+
+    `<th class="num">Proj</th>`+
+    `<th class="num" title="Points per game over replacement at his own position, plus the positional premium this board is ranked on">Draft value</th>`+
+    `<th class="num" title="Average overall pick across the sites in this file">Market pick</th>`+
+    `<th title="Where the market takes him against where this board takes him">Vs market</th></tr>`;
+}
+/* The premium, in words, at whatever the dial is set to. */
+function dftPrem(){
+  const w=dftPull, prem=DRAFT.premium||{};
+  if(!DRAFT.fitted){
+    $("#dftprem").textContent="No positional fit in this file, so this board is the "+
+      "VORP ranking as it stands.";
+    return;
+  }
+  const parts=ORDER.map(p=>{const v=(1-w)*(prem[p]||0);
+      return Math.abs(v)<0.5?null:`${p} ${v>0?"+":"−"}${fmt(Math.abs(v),0)}`;}).filter(Boolean);
+  const dial=w===0
+    ? "The dial is off, so that is the full correction and the board's own order underneath it."
+    : `The dial fades it to ${Math.round((1-w)*100)}% and pulls every player `+
+      `${Math.round(w*100)}% of the way toward his market pick.`;
+  $("#dftprem").innerHTML=(parts.length
+      ? `<strong>Positional correction: ${parts.join(", ")}</strong> season points, `+
+        `measured against the running back — fitted once so each position's top 24 lands `+
+        `where the room takes those same men. `
+      : `<strong>No positional correction needed</strong> at this setting. `)+dial;
+}
+/* Best available at each position, which is the one thing you actually look at
+   with the clock running. Ignores the search box and the position filter on
+   purpose -- filtering the board should not hide who is next up. */
+function dftBav(rows){
+  $("#dftbav").innerHTML=ORDER.map(p=>{
+    const r=rows.find(z=>z.pos===p&&!TAKEN.has(dkey(z)));
+    if(!r)return `<div class="b"><div class="l">${p}</div><div class="n">—</div>`+
+      `<div class="s">nobody left</div></div>`;
+    const gone=r.pick==null?"unpriced":`room takes him ${Math.round(r.pick)}`;
+    return `<div class="b"><div class="l">${p} · next up</div>`+
+      `<div class="n">${r.x.name}</div>`+
+      `<div class="s">board ${r.rank} · ${gone}</div></div>`;
+  }).join("");
+}
+function dftRefresh(){
+  const teams=bigTeams(), q=($("#dftsearch").value||"").trim().toLowerCase();
+  const all=dftRows();
+  dftPrem();
+  dftBav(all);
+  const rows=all.filter(r=>(dftPos==="ALL"||r.pos===dftPos)
+    &&(!q||r.x.name.toLowerCase().includes(q))
+    &&(!dftHide||!TAKEN.has(dkey(r))));
+  // Round bars only in the board's own order -- under a search or a position
+  // filter the rows aren't in pick order and a "ROUND 3" bar would be a lie.
+  const rule=(dftPos==="ALL"&&!q);
+  let seen=0;
+  $("#dftbody").innerHTML=rows.map(r=>{
+    const rd=Math.ceil(r.rank/teams);
+    const bar=(rule&&rd>seen)?(seen=rd,`<tr class="rdsep"><td colspan="7">Round ${rd}</td></tr>`):"";
+    const ecls=r.edge==null?"":r.edge>=teams?"val":r.edge<=-teams?"rch":"";
+    const eword=r.edge==null?'<span class="mut">—</span>'
+      :r.edge>=teams?`<span class="vt g">▲ lasts ${Math.round(r.edge)} picks longer</span>`
+      :r.edge<=-teams?`<span class="vt r">▼ goes ${Math.round(-r.edge)} picks earlier</span>`
+      :`<span class="mut">about where he's drafted</span>`;
+    const k=dkey(r), gone=TAKEN.has(k);
+    const ptitle=Math.abs(r.prem)<0.005?""
+      : ` title="${fmt(r.vor,1)} over replacement ${r.prem>0?"+":"−"} `+
+        `${fmt(Math.abs(r.prem),2)} ${r.pos} premium"`;
+    return bar+`<tr class="row${gone?" gone":""}" data-bpos="${r.pos}" data-id="${r.x.rank}" data-k="${k}">
+      <td class="tkc"><button class="tk" type="button" title="${gone?"Put him back":"Cross him off"}">${gone?"↺":"✓"}</button></td>
+      <td class="rank num">${r.rank}</td>
+      <td class="qb"><span class="pc ${r.pos}">${r.pos}</span> <b>${r.x.name}</b>${teamCell(r.x.team)}</td>
+      <td class="num">${fmt(r.proj,1)}</td>
+      <td class="num vor${r.val<0?" neg":""}"${ptitle}>${r.val>0?"+":""}${fmt(r.val,1)}</td>
+      <td class="num">${r.pick==null?'<span class="mut">—</span>':Math.round(r.pick)}</td>
+      <td class="rd ${ecls}">${eword}</td></tr>`;
+  }).join("")||`<tr><td colspan="7" class="note">Nobody matches that.</td></tr>`;
+
+  $("#dftbody").querySelectorAll("tr.row").forEach(tr=>{
+    tr.onclick=()=>jumpTo(tr.dataset.bpos,tr.dataset.id);
+    tr.querySelector(".tk").onclick=e=>{
+      e.stopPropagation();                   // otherwise crossing him off jumps tabs
+      const k=tr.dataset.k;
+      TAKEN.has(k)?TAKEN.delete(k):TAKEN.add(k);
+      dftRefresh();
+    };
+  });
+  $("#dftnote").textContent=`${rows.length} players shown, ${TAKEN.size} crossed off. `+
+    `Projections are per game. Crossing players off is only for this sitting — `+
+    `it isn't saved, so a refresh gives you a clean board.`;
+}
+
 /* --- boot ---------------------------------------------------------------- */
 posChips($("#ovpos"),p=>{loadBoard(p);});
 posChips($("#bigpos"),p=>{bigPos=(bigPos===p?"ALL":p);
@@ -2772,6 +2998,17 @@ posChips($("#bigpos"),p=>{bigPos=(bigPos===p?"ALL":p);
 // "All" reads better as the un-pressed state of every chip than as a sixth chip.
 $("#bigpos").insertAdjacentHTML("afterbegin",'<span class="note" style="margin:0;padding:0 6px">Only&nbsp;</span>');
 bigHeader();
+posChips($("#dftpos"),p=>{dftPos=(dftPos===p?"ALL":p);
+  document.querySelectorAll("#dftpos button").forEach(b=>
+    b.setAttribute("aria-pressed",String(b.dataset.p===dftPos)));
+  dftRefresh();});
+$("#dftpos").insertAdjacentHTML("afterbegin",'<span class="note" style="margin:0;padding:0 6px">Only&nbsp;</span>');
+$("#dftpull").value=String(dftPull);
+$("#dftpull").onchange=e=>{dftPull=Number(e.target.value);dftRefresh();};
+$("#dftsearch").oninput=dftRefresh;
+$("#dfthide").onchange=e=>{dftHide=e.target.checked;dftRefresh();};
+$("#dftclear").onclick=()=>{TAKEN.clear();dftRefresh();};
+dftHeader();
 buildTabs();
 loadBoard(POS);
 showTab("rankings");

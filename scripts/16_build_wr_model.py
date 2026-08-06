@@ -79,7 +79,7 @@ def _refresh_site() -> None:
         return
     tabs = " + ".join(m.get("pos", "?") for _, m in boards)
     print(f"\n  >>> OPEN THIS ONE:  {out}")
-    print(f"      All positions on one page ({tabs}), plus the Big Board.")
+    print(f"      All positions on one page ({tabs}), plus the Big Board and the VORP Rankings.")
 
 
 def _scoring_label() -> str:

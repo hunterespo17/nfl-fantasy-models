@@ -6,7 +6,12 @@ Step 12 -- Put every position on one page.
 The position models each build on their own schedule, and each one parks its
 finished board in outputs\\boards\\ when it runs. This script reads whatever is
 sitting in that folder and writes ONE page, outputs\\index.html, with a tab per
-position plus the Big Board and a single How-it-works tab.
+position, the Big Board, the VORP Rankings, and a single How-it-works tab.
+
+The Big Board is the draft order and the VORP Rankings are the value board it is
+built out of. The difference between them is one number per position, fitted
+here at build time by src\\draftboard.py, and this script prints that fit so a
+bad one is visible without opening the page.
 
 That split is the whole point. Rebuild only the running backs and the RB tab
 refreshes while the quarterbacks stay exactly as they were -- and a running-back
@@ -74,7 +79,21 @@ def main() -> int:
     print(f"\nSaved to: {out}")
     print(f"  ({out.stat().st_size:,} bytes)")
     print("Open that file in your browser. Tabs across the top: one per")
-    print("position, then Big Board, then How it works.")
+    print("position, then Big Board, then VORP Rankings, then How it works.")
+
+    # The positional premium, echoed here because it is the one thing in the
+    # build that can quietly go wrong without the page looking broken.
+    try:
+        from src import draftboard, report as _r
+        by_pos = {}
+        for result, meta in boards:
+            p, b = _r._board(result, meta)
+            by_pos[p] = b
+        order = sorted(by_pos, key=lambda p: TAB_ORDER.index(p)
+                       if p in TAB_ORDER else 99)
+        print("\n" + draftboard.describe(draftboard.premiums(by_pos, order)))
+    except Exception as exc:                      # never fail a build over a print
+        print(f"\n  (couldn't summarise the draft-board fit: {exc})")
 
     stale = [meta.get("pos") for _, meta in boards
              if meta.get("season") and meta["season"] != config.UPCOMING_SEASON]
