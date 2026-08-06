@@ -113,11 +113,32 @@ def render_site(boards, meta: dict | None = None) -> str:
         "built": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "order": order,
         "boards": by_pos,
+        # What the betting market expects each team to score, for the team
+        # filter's comparison strip. Imported here rather than at the top of the
+        # file on purpose: this module's job is to turn a finished board into
+        # HTML, and it should stay renderable when nothing else in src/ will
+        # import -- a caller holding a saved board and no data folder still gets
+        # a page, just without the outside yardstick on it.
+        "team_env": _team_env(),
     }
     # Data last, and by a token no player name can contain: the JSON carries
     # names and free text, and any string replacement run after it is injected
     # could reach inside the data. There is nothing left to replace afterwards.
     return _TEMPLATE.replace("__DATA_JSON__", json.dumps(payload))
+
+
+def _team_env() -> dict:
+    """The market's implied points per team, or an empty block if unavailable.
+
+    Deliberately swallows everything. The comparison strip is a nicety bolted
+    onto a page that has to render either way, so a missing schedule file, a
+    renamed column or a broken import costs you the strip and not the board.
+    """
+    try:
+        from . import team_env
+        return team_env.for_site()
+    except Exception:
+        return {}
 
 
 def render(result: dict, meta: dict) -> str:
@@ -330,6 +351,33 @@ _TEMPLATE = r"""<!DOCTYPE html>
     text-transform:uppercase;letter-spacing:.05em;font-weight:700;color:var(--ink-2);background:var(--plane)}
   .lwcount{margin:0!important;font-variant-numeric:tabular-nums}
   .lwcount b{color:var(--ink);font-weight:700}
+  /* --- the team strip ---------------------------------------------------
+     Four numbers across the top, then the whole offence laid out by position.
+     The numbers are deliberately plain text on the page background rather than
+     tiles-with-borders: this sits directly above a dense table and a second
+     boxed thing right there competes with the board for the eye. */
+  .teamstrip{padding:16px 18px}
+  .tshead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+  .tshead h3{margin:0;font-size:17px;letter-spacing:-.01em}
+  .tsnums{display:flex;flex-wrap:wrap;gap:10px 30px;margin:12px 0 4px}
+  .tsnum{min-width:112px}
+  .tsnum .v{font-size:22px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.15}
+  .tsnum .k{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);font-weight:700}
+  .tsnum .s{font-size:11.5px;color:var(--muted)}
+  .tsnum .v.over{color:var(--neg)}.tsnum .v.under{color:var(--good)}
+  .tsbar{height:6px;border-radius:4px;background:var(--plane);overflow:hidden;margin:10px 0 2px;position:relative}
+  .tsbar i{position:absolute;top:0;bottom:0;left:0;border-radius:4px;background:var(--accent)}
+  .tsbar u{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.7}
+  .tsgrid{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+  .tspos{flex:1 1 190px;min-width:170px;border:1px solid var(--border);border-radius:10px;padding:9px 11px;background:var(--surface-1)}
+  .tspos h4{margin:0 0 7px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2)}
+  .tsrow{display:flex;justify-content:space-between;gap:8px;font-size:13px;padding:3px 0;align-items:baseline}
+  .tsrow.here{font-weight:700}
+  .tsrow .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tsrow .p{font-variant-numeric:tabular-nums;color:var(--ink-2);white-space:nowrap}
+  .tsrow .p b{color:var(--ink)}
+  .tsnone{font-size:12.5px;color:var(--muted)}
+  .tswarn{font-size:12px;color:var(--muted);margin-top:12px;line-height:1.5}
   .rank{font-variant-numeric:tabular-nums;color:var(--accent);font-weight:800;font-size:15px;width:32px}
   /* A rank inside a big tier is still printed -- you need to know roughly where a
      man goes -- but it is not a verdict, and it was dressed like one. Bold accent
@@ -968,11 +1016,23 @@ _TEMPLATE = r"""<!DOCTYPE html>
              control rather than offering settings that all return nothing. -->
         <label class="note" style="margin:0" id="lwwrap" hidden><span id="lwlab"></span>&nbsp;
           <select class="sortsel" id="lwsel" title="A screen applied to the board. Nothing is hidden — non-matches are dimmed and sorted below the line."></select></label>
+        <!-- The team filter. Unlike every other control here it deliberately
+             SURVIVES a tab switch, because its whole purpose is to be carried
+             from one position to the next: pick Buffalo, then walk QB → RB → WR
+             → TE and you are looking at one offence being shared out. This one
+             really does hide the rest of the league — dimming 400 players to
+             look at eleven is not a filter, it's a haystack. -->
+        <label class="note" style="margin:0">Team&nbsp;
+          <select class="sortsel" id="teamsel" title="Narrow the board to one team. The choice follows you across position tabs."></select></label>
         <input class="search" id="search" type="search" placeholder="Search…" aria-label="Search">
         <span class="note" style="margin:0">Click a row for the full breakdown.</span>
       </div>
       <p class="note lwcount" id="lwcount" style="margin-top:10px"></p>
     </div>
+    <!-- The team strip. Only drawn when a team is picked, and it reads across
+         ALL FOUR boards, not just the tab you're on, because "does this offence
+         add up" is not a question you can answer one position at a time. -->
+    <div class="card teamstrip" id="teamstrip" hidden></div>
     <div class="card" style="padding:14px 16px">
       <div class="tblwrap"><table id="tbl"><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
     </div>
@@ -1881,6 +1941,177 @@ function rebuildFilter(){
   sel.value=lwMode;
 }
 
+/* ==========================================================================
+   THE TEAM FILTER
+
+   Every other control on this page asks a question about a player. This one
+   asks a question about an offence: there is only one ball, and a board that
+   ranks men independently can hand out more of it than exists. Filtering to a
+   team and reading the four positions together is the only way to see that.
+
+   Two decisions worth stating, because both are the opposite of what the
+   league-winner screen does:
+
+     * The team choice SURVIVES a tab switch. Pick Buffalo and walk QB → RB →
+       WR → TE and you are watching one offence get shared out. Resetting it
+       per tab would destroy the only thing it's for.
+     * It genuinely HIDES the rest of the league instead of dimming it. Dimming
+       is right for a screen you might want to overrule mid-draft; it is wrong
+       for "show me the Bills," where the other 400 rows are not context, they
+       are the haystack.
+   ------------------------------------------------------------------------ */
+let teamMode="all";
+const TENV=SITE.team_env||{};
+
+/* Every team that appears anywhere on any board, not just this one. A receiver
+   board with nobody from Cleveland on it should still offer Cleveland — you get
+   an honest empty result and the strip telling you why, which is information,
+   rather than an option that silently isn't there. */
+function allTeams(){
+  const s=new Set();
+  for(const p of ORDER)((SITE.boards[p]||{}).qbs||[]).forEach(x=>{if(x.team)s.add(x.team);});
+  return [...s].sort();
+}
+function rebuildTeams(){
+  const sel=$("#teamsel"),ts=allTeams();
+  sel.innerHTML='<option value="all">All teams</option>'+
+    ts.map(t=>`<option value="${t}">${t}</option>`).join("");
+  if(teamMode!=="all"&&!ts.includes(teamMode))teamMode="all";
+  sel.value=teamMode;
+}
+
+/* One team's whole offence, priced off every board at once.
+
+   The scoreboard estimate is the one number here that is not simply read off a
+   board, so it is worth being explicit about. Fitted on 254 team-seasons,
+   2018-2025:  points/gm = 6.76 x (offensive TDs/gm) + 6.43,  r = +0.955.
+
+   The slope is near seven because a touchdown carries the extra point with it.
+   The intercept is field goals, defensive and special-teams scores — points no
+   fantasy roster contains, which is why a pile of skill players can never add
+   up to a Vegas total by itself and why the intercept is not optional.
+
+   A passing touchdown and the receiving touchdown that scores it are ONE event.
+   Offensive TDs are passing plus rushing. Counting receiving as well would
+   double every one of them. */
+function teamOffence(team){
+  const out={team:team,pos:{},td:0,n:0};
+  for(const p of ORDER){
+    const bd=SITE.boards[p]; if(!bd)continue;
+    const men=(bd.qbs||[]).filter(x=>x.team===team);
+    // Score each man on his OWN board's weights, not the tab you happen to be
+    // looking at, so a Bills receiver reads the same whether you got here from
+    // the WR tab or the QB one.
+    const ctx=ctxFor(p);
+    const rows=men.map(x=>({name:x.name,rank:x.rank,
+      p:rateIn(x,ctx),g:num(x.avail_games)})).sort((a,b)=>b.p-a.p);
+    out.pos[p]=rows; out.n+=rows.length;
+  }
+  return out;
+}
+function num(v){const n=Number(v);return isFinite(n)?n:0;}
+
+/* Touchdowns per game for one team, backed out of the boards.
+
+   The boards carry fantasy points, not scores, so the scores have to be
+   recovered: pay for the catches and the yards at the league's scoring, and
+   whatever fantasy points are left over are touchdowns.
+
+     receivers, tight ends   carry a season TD figure outright — divide by 17
+     backs                   catches = targets x catch rate, yards = catches x
+                             yards-per-catch; what the receiving line still owes
+                             after paying for those is receiving touchdowns, and
+                             the same trick on carries gives rushing touchdowns
+     quarterbacks            rushing only, carries x yards-per-carry
+
+   A RECEIVING touchdown and the PASSING touchdown that threw it are one event
+   and one score. Counting the quarterback's passing touchdowns on top of his
+   receivers' would double every one of them, so the passing line is left out
+   entirely and the receivers stand in for it. Offensive TDs = receiving +
+   rushing, which is the same number as passing + rushing, counted from the end
+   the boards actually measure. */
+function teamTDs(team){
+  const S=TENV.scoring||{}, R=TENV.rates||{}, GM=TENV.games||17;
+  const sc=(k,d)=>{const v=Number(S[k]);return isFinite(v)?v:d;};
+  const REC=sc("reception",0.5), RECY=sc("receiving_yards",0.1), RECTD=sc("receiving_td",6);
+  const RUSHY=sc("rushing_yards",0.1), RUSHTD=sc("rushing_td",6);
+  const CR=R.rb_catch_rate||0.75, YPRR=R.rb_ypc_rec||7.6;
+  const RYPC=R.rb_ypc||4.35, QYPC=R.qb_ypc||5.20;
+  let rec=0,rush=0;
+  const of=p=>((SITE.boards[p]||{}).qbs||[]).filter(x=>x.team===team);
+
+  ["WR","TE"].forEach(p=>of(p).forEach(x=>{rec+=num(x.td)/GM;}));
+  of("RB").forEach(r=>{
+    const catches=num(r.targets_pg)*CR, yds=catches*YPRR;
+    const paid=catches*REC+yds*RECY;
+    rec+=Math.max(0,(num(r.rec_fpg)-paid)/RECTD);
+    rush+=Math.max(0,(num(r.rush_fpg)-num(r.carries_pg)*RYPC*RUSHY)/RUSHTD);
+  });
+  of("QB").forEach(q=>{
+    rush+=Math.max(0,(num(q.rush_fpg)-num(q.rush_att_pg)*QYPC*RUSHY)/RUSHTD);
+  });
+  return {rec:rec,rush:rush,off:rec+rush};
+}
+
+function teamStrip(){
+  const box=$("#teamstrip");
+  if(teamMode==="all"){box.hidden=true;box.innerHTML="";return;}
+  box.hidden=false;
+  const t=teamMode, off=teamOffence(t), tds=teamTDs(t);
+  const env=(TENV.implied||{})[t];
+  const slope=TENV.slope||6.76, base=TENV.base||6.43;
+  const ours=tds.off*slope+base;
+  const vegas=env?env.implied:null;
+  const gap=vegas==null?null:ours-vegas;
+  const cls=gap==null?"":(gap>1.5?"over":(gap<-1.5?"under":""));
+
+  const numBlock=(k,v,s,c)=>`<div class="tsnum"><div class="k">${k}</div>`+
+    `<div class="v${c?" "+c:""}">${v}</div><div class="s">${s||"&nbsp;"}</div></div>`;
+
+  let bar="";
+  if(vegas!=null){
+    const hi=Math.max(ours,vegas,1), w=x=>Math.round(100*x/(hi*1.15));
+    bar=`<div class="tsbar"><i style="width:${w(ours)}%"></i>`+
+        `<u style="left:${w(vegas)}%" title="Vegas ${vegas.toFixed(1)}"></u></div>`+
+        `<div class="s" style="font-size:11.5px;color:var(--muted)">`+
+        `bar = what our boards imply · tick = the market's number</div>`;
+  }
+
+  const grid=ORDER.map(p=>{
+    const rows=off.pos[p]||[];
+    const body=rows.length
+      ? rows.slice(0,6).map(r=>`<div class="tsrow${p===POS?" here":""}">`+
+          `<span class="n">${r.name}</span>`+
+          `<span class="p"><b>${fmt(r.p)}</b> ppg · ${fmt(r.g,0)}g</span></div>`).join("")
+      : `<div class="tsnone">nobody from ${t} on this board</div>`;
+    const extra=rows.length>6?`<div class="tsnone">+${rows.length-6} more</div>`:"";
+    return `<div class="tspos"><h4>${p}</h4>${body}${extra}</div>`;
+  }).join("");
+
+  box.innerHTML=`<div class="tshead">${teamCell(t)}<h3>${t} — the whole offence</h3></div>`+
+    `<div class="tsnums">`+
+      numBlock("Our boards imply",ours.toFixed(1)+" pts/gm",
+        `${tds.off.toFixed(2)} offensive TDs/gm`,cls)+
+      numBlock("Vegas implies",vegas==null?"—":vegas.toFixed(1)+" pts/gm",
+        env?`${env.n} game${env.n===1?"":"s"} priced · ${env.lo.toFixed(1)}–${env.hi.toFixed(1)}`
+           :"no line posted yet")+
+      numBlock("Gap",gap==null?"—":(gap>=0?"+":"")+gap.toFixed(1),
+        gap==null?"":"points per game",cls)+
+      numBlock("On the boards",String(off.n),"players across all four")+
+    `</div>${bar}<div class="tsgrid">${grid}</div>`+
+    `<p class="tswarn">The scoreboard estimate converts touchdowns to points at
+     <b>6.76 × offensive TDs/gm + 6.43</b>, fitted on 254 team-seasons from 2018–2025
+     (r = +0.955). The intercept is kicking, defence and special teams — points no
+     fantasy roster contains, which is why the skill players alone can never reach a
+     Vegas total. Every rate here is per game that player <i>plays</i>, so adding a
+     roster up quietly assumes nobody misses a week; across all 32 teams that lands
+     <b>+0.5</b> pts/gm of Vegas at the median, so treat a big gap as a real
+     disagreement and a small one as noise. ${env?`Vegas here is an average of the
+     <b>${env.n}</b> ${t} game${env.n===1?"":"s"} that already have a posted line, out
+     of 17 — a real market view of an early-season schedule, not a season
+     projection.`:""}</p>`;
+}
+
 /* --- images -------------------------------------------------------------
    Logos and headshots come from ESPN's image CDN. Nothing here is load-bearing:
    if a request fails (offline, 404, blocked), onerror swaps in the text the
@@ -2074,7 +2305,14 @@ function refresh(){
      Proj column and the bar still print _p -- a back who misses a month is the
      same player in the games he does play, and hiding that would make his row
      lie about him. His row says how many games instead. */
-  const rows=DATA.qbs.map(x=>{x._p=projOf(x);x._v=valOf(x);x._lw=lwMatch(x);return x;}).filter(x=>!q||x.name.toLowerCase().includes(q));
+  const rows=DATA.qbs.map(x=>{x._p=projOf(x);x._v=valOf(x);x._lw=lwMatch(x);return x;})
+    .filter(x=>!q||x.name.toLowerCase().includes(q))
+    .filter(x=>teamMode==="all"||x.team===teamMode);
+  /* `all` stays the WHOLE board on purpose. It is what the rank column and
+     replacement level are read off, so filtering to one team leaves the Bills'
+     receiver showing the rank he holds in the league — WR14 — instead of being
+     renumbered WR1 because he is the best Bill. A team view that renumbers
+     everyone is a different board, not a filter. */
   const all=DATA.qbs.slice().sort((a,b)=>b._v-a._v);
   const replPts=all.length?all[Math.min(REPL,all.length-1)]._v:0;
   rows.sort(sortCmp(sortMode));
@@ -2140,6 +2378,7 @@ function refresh(){
   // Left until last on purpose: if one panel ever failed to build, the board
   // itself is already wired and usable rather than rendered-but-dead.
   wasOpen.forEach(id=>fillPanel(document.querySelector(`tr.detail[data-for="${id}"]`)));
+  teamStrip();
 }
 
 function header(){
@@ -2152,6 +2391,7 @@ $("#search").oninput=refresh;
 $("#sortsel").onchange=e=>{sortMode=e.target.value;refresh();};
 $("#lwsel").onchange=e=>{lwMode=e.target.value;refresh();};
 $("#platsel").onchange=e=>{draftPlatform=e.target.value;header();refresh();};
+$("#teamsel").onchange=e=>{teamMode=e.target.value;refresh();};
 $("#reset").onclick=()=>{Object.assign(weights,DATA.weights);sliders();refresh();};
 
 /* --- switching boards -----------------------------------------------------
@@ -2202,6 +2442,12 @@ function loadBoard(pos){
   // Controls that describe the board reset with it: "Drafting on Sleeper" is
   // meaningless on a board Sleeper doesn't price, and the screens are different
   // questions at each position, so the filter always comes back to All.
+  /* teamMode is deliberately NOT in that list. Every other control here
+     describes the board and so dies with it; the team choice describes the
+     OFFENCE, and carrying it across tabs is the entire feature -- pick Buffalo
+     on the WR tab and walking to RB should still be Buffalo, or you are just
+     re-picking the same team four times to answer one question. If the new
+     board has nobody from that team, rebuildTeams() drops it back to All. */
   draftPlatform="consensus"; sortMode="proj"; lwMode="all";
   $("#search").value=""; $("#lwcount").innerHTML="";
   rebuildSelects();
@@ -2235,6 +2481,7 @@ function rebuildSelects(){
     PLATS.map(p=>`<option value="${p}">${PLABEL[p]||p}</option>`).join("");
   $("#platsel").value=draftPlatform;
   rebuildFilter();
+  rebuildTeams();
 }
 /* Blocks written for one position only -- the archetype cards, Heath's screen --
    are marked data-pos in the HTML and shown or hidden here. This is what lets a
