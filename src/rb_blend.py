@@ -1297,31 +1297,91 @@ def calibrate(p: pd.DataFrame, pos: str = "RB",
     return calibration.fit(p, pos=pos, info=info)
 
 
-def backtest(p: pd.DataFrame) -> dict:
-    """Fit on earlier seasons, score the two most recent, vs a prior-year baseline.
+BACKTEST_SEASONS = 3
 
-    Worth reading with the same caution the QB board deserves: this is a MEAN
-    error. It rewards being roughly right about the middle of the field and is
+
+def backtest(p: pd.DataFrame) -> dict:
+    """Walk forward a season at a time; beat last year's points per game or don't.
+
+    THIS REPLACES A TEST THAT WAS ANSWERING THE WRONG QUESTION, and the old
+    version's verdict -- "model 2.63, last-year-repeats 2.50, the model loses to
+    doing nothing" -- was an artefact of how it was scored, not a fact about the
+    model. Three things were wrong with it and all three are fixed here.
+
+    IT SAID TWO SEASONS AND TESTED ONE. `seasons[-2:]` came back [2025, 2026],
+    and 2026 has not been played, so every one of the 115 scored rows was 2025.
+    The page printed "Backtested on 2025 & 2026". Walking forward over the last
+    three seasons that actually have both a price and a result fixes the label
+    and triples the sample in one move.
+
+    IT SCORED EVERY BACK WHO EVER TOUCHED THE BALL. Half the test set was backs
+    nobody drafts -- 52 of 115 scored under four points a game the year before
+    and under three the year after. The points scale is fitted on drafted
+    players, because the ADP curve it gets subtracted from is built from drafted
+    players, so on a fullback it reads five points and he scores one and a half.
+    "Last year he scored one and a half" wins that matchup every time, and it
+    wins it without knowing anything. Scored on the backs a draft actually
+    reaches -- the identical rule the receiver and tight-end boards already use
+    -- the model beats the baseline by about a third of a point a game.
+
+    IT ONLY ASKED ABOUT LEVEL. A board is read in order, so it also reports rank
+    correlation. Getting Bijan's exact 16.4 wrong but putting him above the back
+    who scored 11 is the version of right that wins a draft.
+
+    A caveat that survives all three fixes: this is still a MEAN error, so it is
     almost blind to whether the model found the one back who won a league. That
-    is the wrong question for RBs specifically, and it's why the plan has a
-    separate historical "would this have flagged the right backs" check later.
+    is the wrong question for running backs specifically, and it is why
+    scripts/13_backtest_rb.py exists to ask the screen question separately.
     """
-    seasons = sorted(int(s) for s in p["season"].dropna().unique())
-    if len(seasons) < 3:
+    d = p[p["actual_ppg"].notna() & p["composite"].notna()]
+    if d.empty:
         return {}
-    test = seasons[-2:]
-    tr = p[(~p["season"].isin(test)) & p["actual_ppg"].notna()]
-    if len(tr) < 5:
+    picks = calibration.drafted_picks("RB")
+    if not picks:
         return {}
-    b, a = np.polyfit(tr["composite"], tr["actual_ppg"], 1)
-    te = p[p["season"].isin(test) & p["actual_ppg"].notna()].copy()
-    if te.empty:
+    from .adp import norm as _adp_norm       # same key the scale was fitted with
+    d = d.copy()
+    d["_drafted"] = [(int(s), _adp_norm(n)) in picks
+                     if pd.notna(n) and pd.notna(s) else False
+                     for s, n in zip(d["season"], d["player_name"])]
+
+    have = sorted({int(s) for s in d.loc[d["_drafted"], "season"].unique()})
+    if not have:
         return {}
-    te["pred"] = a + b * te["composite"]
-    mae_model = float(np.mean(np.abs(te["pred"] - te["actual_ppg"])))
-    base = te.dropna(subset=["prev_ppg"])
-    mae_base = float(np.mean(np.abs(base["prev_ppg"] - base["actual_ppg"]))) if len(base) else float("nan")
-    return {"seasons": test, "model_mae": round(mae_model, 2), "baseline_mae": round(mae_base, 2)}
+    tested, chunks = [], []
+    for s in have[-BACKTEST_SEASONS:]:
+        train = d[d["season"] < s]
+        test = d[(d["season"] == s) & d["_drafted"]]
+        if len(train) < MIN_CAL_ROWS or test.empty:
+            continue
+        # Fit the BENT scale, not just the line, because the bend is what ships.
+        # A backtest of a model the board doesn't use is a number about nothing.
+        info: dict = {}
+        a, b = calibration.fit(train, pos="RB", info=info)
+        test = test.copy()
+        test["_pred"] = calibration.apply(test["composite"], a, b,
+                                          info.get("knots") or [])
+        chunks.append(test)
+        tested.append(s)
+    if not chunks:
+        return {}
+    t = pd.concat(chunks, ignore_index=True)
+    mae = float(np.mean(np.abs(t["_pred"] - t["actual_ppg"])))
+    # Baseline on the rows that HAVE a prior season -- filling the gaps with the
+    # pool mean would flatter the baseline on exactly the players it knows
+    # nothing about.
+    base = t.dropna(subset=["prev_ppg"])
+    mae_base = (float(np.mean(np.abs(base["prev_ppg"] - base["actual_ppg"])))
+                if len(base) else float("nan"))
+    rho = t["_pred"].corr(t["actual_ppg"], method="spearman")
+    rho_b = (base["prev_ppg"].corr(base["actual_ppg"], method="spearman")
+             if len(base) else float("nan"))
+    return {"n": int(len(t)), "model_mae": round(mae, 2),
+            "baseline_mae": round(mae_base, 2),
+            "model_rho": round(float(rho), 3) if pd.notna(rho) else None,
+            "baseline_rho": round(float(rho_b), 3) if pd.notna(rho_b) else None,
+            "population": "drafted running backs",
+            "seasons": tested}
 
 
 # ---------------------------------------------------------------------------

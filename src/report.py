@@ -1163,12 +1163,22 @@ function freshCheck(){
 }
 setTimeout(freshCheck, 1200);
 function backtestStat(){
-  const bt=DATA.backtest;
-  $("#btstat").innerHTML=(bt&&bt.model_mae!=null)
-    ?`<div class="stat"><b>${fmt(bt.model_mae,2)}</b><span>model error (MAE, pts/gm)</span></div>`+
-     `<div class="stat"><b>${fmt(bt.baseline_mae,2)}</b><span>last-year-repeats baseline</span></div>`+
-     `<div class="note">Backtested on ${(bt.seasons||[]).join(" & ")} — lower is better.</div>`
-    :"";
+  /* Two numbers, not one. Error says how close the points are; rank says
+     whether the board is in the right ORDER, which is the thing you draft off.
+     Both are scored on the players a draft actually reaches -- score a points
+     scale built for drafted players against every third-stringer who ever ran a
+     route and "last year he scored nothing" wins without knowing anything. */
+  const bt=DATA.backtest; if(!bt||bt.model_mae==null){$("#btstat").innerHTML="";return;}
+  const win=bt.model_mae<bt.baseline_mae, rwin=bt.model_rho!=null&&bt.baseline_rho!=null&&bt.model_rho>bt.baseline_rho;
+  let h=`<div class="stat"><b>${fmt(bt.model_mae,2)}</b><span>model error (MAE, pts/gm)</span></div>`+
+        `<div class="stat"><b>${fmt(bt.baseline_mae,2)}</b><span>last-year-repeats baseline</span></div>`;
+  if(bt.model_rho!=null) h+=`<div class="stat"><b>${fmt(bt.model_rho,3)}</b><span>rank agreement with the real season</span></div>`+
+        `<div class="stat"><b>${fmt(bt.baseline_rho,3)}</b><span>same, for last-year-repeats</span></div>`;
+  h+=`<div class="note">Each season predicted using only the seasons before it — `+
+     `${(bt.seasons||[]).join(", ")}${bt.n?`, ${bt.n} ${bt.population||"player"} seasons`:""}. `+
+     `Lower error is better, higher rank agreement is better. `+
+     `The model ${win?"beats":"loses to"} the baseline on error and ${rwin?"beats":"loses to"} it on order.</div>`;
+  $("#btstat").innerHTML=h;
 }
 
 /* --- tabs ----------------------------------------------------------------
@@ -1806,6 +1816,16 @@ function pickOf(x){
   return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;
 }
 const viaHas=(x,re)=>(x.lw_gate_via||[]).some(s=>re.test(s));
+/* The verdict on ONE named check, whichever group it's in. viaHas above only
+   ever sees the PATHS, because lw_gate_via is the list of paths a player
+   cleared — which is right for "how did he qualify" and useless for the support
+   rows, which never decide the gate and so never appear there. This reads the
+   checklist itself and hands back true / false / null, so a support row can be
+   filtered on without ever being able to promote a player through the gate.
+   Null matters: an unmeasured check is neither a pass nor a fail, so === true
+   and === false are both false for it and he lands below the line either way. */
+const chkOf=(x,re)=>{const c=(x.lw_checks||[]).find(c=>re.test(c.label));
+  return c?c.pass:null;};
 /* One reader for both receiving boards. The tight-end payload writes its chips
    under te_flags rather than wr_flags so the two can never be confused upstream,
    but the KEYS INSIDE are deliberately identical — gate75, fd_badge, prime,
@@ -1853,6 +1873,81 @@ const LWDEF={
          pc:  ()=>"Below the line — not a McShanahan-tree play-caller",
          miss:()=>"Below the line — clear at least one path, or aren't measured on both"}},
 
+  /* The running-back screen, and the one board where the PRICE lives inside the
+     gate instead of beside it. The quarterback board offers "late-round winners"
+     as a separate option because there the round is an extra filter on top of a
+     screen that stands on its own. Here it is not an extra — it is the finding.
+
+     Measured over 272 drafted back-seasons, 2020-2024:
+
+       cheap alone (after pick 60)            n=148   +0.23 pts/gm   p=0.36
+       played half the snaps, alone           n=125   +0.36          p=0.28
+       3+ targets a game, alone               n=121   +0.23          p=0.36
+       half the snaps, AMONG cheap backs      n=35    +1.39          p=0.05
+       half the snaps, AMONG expensive backs  n=90    -0.21          p=0.59
+
+     Neither half is worth anything by itself. Together and only together they
+     are worth over a point a game, and on an early-round back the same facts are
+     slightly NEGATIVE, because the market has already charged you for them. So
+     there is no "any round" option here — it would be a screen we measured and
+     found to be nothing. An early-round back reading "misses both paths" is the
+     screen working: it is saying you are paying for the role, not finding it.
+
+     BACKTESTED, and it survived two things that kill most findings.
+
+     (1) A DIFFERENT PRICE SOURCE. Everything above is FFC prices. Rebuilt end to
+     end on FantasyPros ECR -- a deeper list, ~145 backs a year against FFC's ~55
+     -- the same screen on the same seasons gains +0.82 pts/gm, p=0.095, hitting
+     15.9% against 12.1%. Real, and about two thirds as strong. Some of the edge
+     was FFC's shallower list, not the screen. Varying the expectation curve
+     (full-sample vs walk-forward) and the depth cut changed nothing at all.
+
+     (2) A SEASON NOTHING HERE HAD SEEN. 2025, priced by a curve fitted only on
+     2020-2024: gain +1.07, hit 18.8% against 10.0% (p=0.202, n=56 -- one season
+     is thin). All five seasons 2021-2025 gain, +0.49/+0.58/+0.93/+0.92/+1.07.
+
+     What it is NOT is a guarantee. Of the sixteen backs the screen picked in
+     2025, three won leagues (Etienne, Javonte Williams, Dowdle) and four were
+     disasters (Najee Harris 3 games, Ekeler 2, Jerome Ford, Brian Robinson). The
+     screen moves the CHANCE of a hit from about one in ten to about one in five.
+     It does not tell you which one.
+
+     A note on how a short season is scored, because it decides the whole result:
+     a back who plays under 8 games is scored as a full miss (-expected), not
+     dropped. An earlier version of this backtest dropped them, which deletes
+     every injury bust from BOTH sides of the comparison, and the effect vanished
+     -- for exactly that reason, not a real one. Busting is half of what this
+     screen is about, so busts have to stay in. */
+  RB:{label:"League winners",
+    opts:[["all","All RBs"],
+          ["any","Clears a path (cheap + a real role)"],
+          ["snap","— cheap and already playing"],
+          ["pass","— cheap and catching passes"],
+          ["full","Played a full season last year"],
+          ["short","Coming off a short season"],
+          ["miss","Misses both paths"]],
+    match:{any:  x=>x.lw_gate===true,
+           snap: x=>viaHas(x,/already playing/i),
+           pass: x=>viaHas(x,/catching/i),
+           /* Support row, both directions. A back with no prior season at all —
+              every rookie — is null on this and matches neither, which is the
+              honest answer rather than a flattering or a damning one. */
+           full: x=>chkOf(x,/games last year/i)===true,
+           short:x=>chkOf(x,/games last year/i)===false,
+           miss: x=>x.lw_gate===false},
+    note:{any:  ()=>"are priced after pick 60 AND already had a real role last season — 17.2% of them beat their price by 4+ points a game, against 10.3% of everyone else. It held on 2025, a season it was never fitted on: 18.8% against 10.0%",
+          snap: ()=>"go after pick 60 and played half their team's snaps last season — 17.1% hit, against 9.7% of the other cheap backs",
+          pass: ()=>"go after pick 60 and caught 3+ targets a game last season — 16.3% against 9.5%. Pass work is the part of a back's role that survives a change of starter",
+          full: ()=>"played 12 or more games last season — 13.8% hit against 7.7% for everyone else, the one durability signal that held up across four of five years",
+          short:()=>"played 11 games or fewer last season — they hit at 5.8% against 13.2%. It doesn't decide the screen, it colours it",
+          miss: ()=>"were measured on both paths and cleared neither — which for an early-round back mostly means you're paying for the role rather than finding it"},
+    sep:{any:  ()=>"Below the line — priced inside pick 60, no proven role, or no prior season to judge",
+         snap: ()=>"Below the line — inside pick 60, under half the snaps, or no snap history",
+         pass: ()=>"Below the line — inside pick 60, under 3 targets a game, or no target history",
+         full: ()=>"Below the line — 11 games or fewer last season, or no prior season",
+         short:()=>"Below the line — played 12+ games last season, or no prior season",
+         miss: ()=>"Below the line — clear at least one path, or aren't measured on both"}},
+
   /* The receiver screens. Two of Heath's, plus the two facts about a receiver
      that the market prices and the model deliberately does not: which career
      year he is in, and whether his room is crowded. A receiver with no measured
@@ -1898,29 +1993,69 @@ const LWDEF={
      because the market prices crowding there; here the market doesn't either.
 
      The career window runs later too — years three to seven rather than three to
-     five. Tight ends don't fall off until year eight. */
+     five. Tight ends don't fall off until year eight.
+
+     This board carries a SECOND family of screens, in its own group below: the
+     league-winner paths, fitted the same way the running-back ones were, on 142
+     drafted tight-end seasons from 2020 to 2025 against a 2-point edge bar.
+
+       played 80%+ of the snaps      n=41   +1.27 pts/gm   p=0.004   22.0% vs 9.9%
+       owns 75%+ of his TEs' work    n=43   +0.74          p=0.057   18.6% vs 11.1%
+       either path                   n=59   +1.18          p=0.002   20.3% vs 8.4%
+       measured, clears neither      n=76   -1.56                     6.6% vs 21.2%
+
+     Unlike the running backs, price is NOT inside these gates — the tight-end
+     effect is a main effect and it survives at every price, so folding the round
+     in would only shrink the sample. Read alongside the route screens above: the
+     route gate asks whether he is on the field for the passing game, and these
+     ask whether the position group on his team is really just him.
+
+     One caveat the reader is owed, and it is in How it works too: our own board
+     shares the market's blind spot here. Tight ends clearing the snap path beat
+     OUR projection by 1.7 points a game more than the rest, so this filter is
+     currently finding players the board itself is ranking too low. */
   TE:{label:"Screen",
     opts:[["all","All TEs"],
-          ["gate","Runs 65%+ of the routes"],
-          ["fd","Moves the chains (1D per route)"],
-          ["both","Clears both screens"],
-          ["window","In the career window (yrs 3–7)"],
-          ["miss","Clears neither screen"]],
+          ["gate","Runs 65%+ of the routes","Route screens"],
+          ["fd","Moves the chains (1D per route)","Route screens"],
+          ["both","Clears both screens","Route screens"],
+          ["window","In the career window (yrs 3–7)","Route screens"],
+          ["miss","Clears neither screen","Route screens"],
+          ["lw","Clears a path","League winners"],
+          ["lwsnap","— plays 80%+ of the snaps","League winners"],
+          ["lwown","— owns his tight end room","League winners"],
+          ["lwdraft","Was a 1st- or 2nd-round NFL pick","League winners"],
+          ["lwmiss","Misses both paths","League winners"]],
     match:{gate:  x=>wrf(x).gate75===true,
            fd:    x=>wrf(x).fd_badge===true,
            both:  x=>wrf(x).gate75===true&&wrf(x).fd_badge===true,
            window:x=>wrf(x).prime===true,
-           miss:  x=>x.route_share!=null&&wrf(x).gate75===false&&wrf(x).fd_badge===false},
+           miss:  x=>x.route_share!=null&&wrf(x).gate75===false&&wrf(x).fd_badge===false,
+           lw:    x=>x.lw_gate===true,
+           lwsnap:x=>viaHas(x,/snaps/i),
+           lwown: x=>viaHas(x,/room/i),
+           lwdraft:x=>chkOf(x,/NFL pick/i)===true,
+           lwmiss:x=>x.lw_gate===false},
     note:{gate:  ()=>"run a route on 65%+ of their team's dropbacks, which was worth 7.0 points a game the following season against 3.5 — and 20.7% of them went on to a 10-point season against 1.3% of the rest",
           fd:    ()=>"earn a first down on 6.5%+ of their routes, over at least 200 routes — worth 8.0 points a game next season against 4.2, and 28.2% reached 10 points a game against 3.7%",
           both:  ()=>"clear the route gate AND the first-down badge",
           window:()=>"are in years three to seven, which is where tight end production holds up — the drop doesn't arrive until year eight",
-          miss:  ()=>"were measured on both screens and cleared neither"},
+          miss:  ()=>"were measured on both screens and cleared neither",
+          lw:    ()=>"already played 80% of the snaps last season, or already owned their tight end room — 20.3% of them beat their draft price by 2+ points a game, against 8.4% of everyone else",
+          lwsnap:()=>"played 80%+ of their team's offensive snaps last season — 22.0% hit against 9.9%, the strongest single screen on any of the four boards (p=0.004 over six seasons)",
+          lwown: ()=>"took 75%+ of the expected points going to their own team's tight ends last season — 18.6% against 11.1%",
+          lwdraft:()=>"were a first- or second-round NFL pick — 15.0% against 11.3%. Supporting evidence only; it never decides the screen",
+          lwmiss:()=>"were measured on both paths and cleared neither — a group that missed its price by 1.6 points a game and hit 6.6% of the time against 21.2%"},
     sep:{gate:  ()=>"Below the line — under 65% of the routes, or no measured route share",
          fd:    ()=>"Below the line — under a 0.065 first-down rate, or under 200 routes to judge it on",
          both:  ()=>"Below the line — clear at most one of the two screens",
          window:()=>"Below the line — first or second year, or year eight and beyond",
-         miss:  ()=>"Below the line — clear at least one screen, or aren't measured on both"}},
+         miss:  ()=>"Below the line — clear at least one screen, or aren't measured on both",
+         lw:    ()=>"Below the line — under 80% of the snaps and under 75% of their room, or no prior season to measure",
+         lwsnap:()=>"Below the line — under 80% of the snaps last season, or no snap history",
+         lwown: ()=>"Below the line — under 75% of their tight end room, or no prior season",
+         lwdraft:()=>"Below the line — drafted in round three or later, or undrafted",
+         lwmiss:()=>"Below the line — clear at least one path, or aren't measured on both"}},
 };
 function lwDef(){return LWDEF[POS]||null;}
 function lwMatch(x){const d=lwDef(); if(!d)return true;
@@ -1937,7 +2072,22 @@ function rebuildFilter(){
   wrap.hidden=!d;
   if(!d){sel.innerHTML="";return;}
   $("#lwlab").textContent=d.label;
-  sel.innerHTML=d.opts.map(([v,t])=>`<option value="${v}">${t}</option>`).join("");
+  /* An option is [value, text] or [value, text, group]. Only the tight-end board
+     uses the third slot, because it is the only one carrying two unrelated
+     families of screen — routes and league winners — and a flat list of eleven
+     would read as one muddled screen. Boards without groups render exactly as
+     they always did. */
+  let html="",grp=null;
+  for(const o of d.opts){
+    const g=o[2]||null;
+    if(g!==grp){if(grp)html+="</optgroup>";grp=g;if(g)html+=`<optgroup label="${g}">`;}
+    html+=`<option value="${o[0]}">${o[1]}</option>`;
+  }
+  if(grp)html+="</optgroup>";
+  sel.innerHTML=html;
+  /* A mode carried over from another board may not exist here; fall back to
+     showing everyone rather than silently matching nobody. */
+  if(!d.match[lwMode]&&lwMode!=="all")lwMode="all";
   sel.value=lwMode;
 }
 

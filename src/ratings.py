@@ -38,6 +38,7 @@ import pandas as pd
 
 from . import adp as adp_mod
 from . import calibration
+from . import lw_facts
 from . import qb_blend
 from . import scoring
 
@@ -104,6 +105,56 @@ MCSHANAHAN = "mcshanahan"    # the one `tree` value in data/playcallers.csv we a
 # The negative side (-2.0) is OUR symmetric mirror of the +2.0 value bar, not a
 # number from the research. It only ever drives a soft "pricey" label.
 OVERPRICED_FPG = -2.0
+
+# --- The same bar means different points at different positions --------------
+# LW_FPG_EDGE above is 5.0 and it is a QUARTERBACK number. A quarterback scores
+# about 18 a game, so beating his draft slot by five is a 28% overshoot; a tight
+# end scores about nine, so the same five points is a 55% overshoot. Applied
+# position-blind, as it was, "League winner" was roughly three times rarer on the
+# tight-end board than on the quarterback board -- not because tight ends win
+# fewer leagues, but because they were being graded on somebody else's bar.
+#
+# So the three non-QB bars below are MEASURED, not chosen: for each position,
+# take every drafted season 2020-2025, work out how far it beat what its draft
+# slot has historically returned, and set the bar at the 88th percentile. That
+# makes a league-winning season about one in eight everywhere -- roughly one per
+# position per draft, which is what the phrase is supposed to mean.
+#
+# The quarterback bar is deliberately left at Heath's published 5.0 rather than
+# at our own measured 3.5, because the QB screen quotes his hit rate on the page
+# and the two have to be the same number. Our sample says his bar is slightly
+# stricter than the data requires; that is a note for the reader, not a licence
+# to quietly restate his finding.
+LW_BARS = {"QB": 5.0, "RB": 4.0, "WR": 3.5, "TE": 2.0}
+
+# --- Running-back league-winner screen ---------------------------------------
+# Fitted on 272 drafted running-back seasons, 2020-2024. The headline is an
+# INTERACTION and it does not survive being split into main effects, which is
+# most of why it is trustworthy:
+#
+#   priced after pick 60, on its own ......... +0.23 pts/gm  (p=0.36) nothing
+#   played half the snaps, on its own ........ +0.36 pts/gm  (p=0.28) nothing
+#   played half the snaps, AMONG CHEAP BACKS . +1.39 pts/gm  (p=0.05)
+#   played half the snaps, AMONG COSTLY BACKS  -0.21 pts/gm  (p=0.59)
+#
+# That shape has an obvious reading: a proven role is worth a lot when you are
+# not paying for it and worth nothing when you are, because the market has
+# already charged you. So the price belongs INSIDE the check rather than beside
+# it -- an expensive back with a big role genuinely does not clear this screen,
+# and saying so is information, not a technicality.
+RB_CHEAP_PICK = 60      # overall pick; past here the market is no longer paying for role
+RB_SNAP_GATE = 0.50     # share of his team's offensive snaps, last season
+RB_TGT_GATE = 3.0       # targets per game, last season
+RB_FULL_SEASON = 12     # under this many games last year is the warning, not a path
+
+# --- Tight-end league-winner screen ------------------------------------------
+# Fitted on 142 drafted tight-end seasons, 2020-2025. Both paths are about
+# INCUMBENCY: the tight end who was already the one on the field is the one who
+# beats his price. Clearing either path was worth +1.18 pts/gm (p=0.002), a
+# 20.3% hit rate against 8.4%, and it pointed the right way in all six seasons.
+TE_SNAP_GATE = 0.80     # share of his team's offensive snaps, last season
+TE_XFP_GATE = 0.75      # his share of his own team's tight ends' expected points
+TE_DRAFT_ROUND = 2      # a first- or second-round NFL pick (supporting evidence)
 
 
 def _first(df, names):
@@ -692,6 +743,225 @@ def _flags(payload: list, pos: str, S: dict) -> None:
 # ---------------------------------------------------------------------------
 # main entry
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# League-winner checklists
+#
+# One shape for all three positions. Each builder writes q["lw_checks"], a list
+# of {label, pass, detail, why, group} where `group` is "path" (an alternative
+# route through the screen -- any one of them clears it) or "support" (evidence
+# the reader should see but that does not decide the gate). `_lw_gate` then
+# turns those into the verdict.
+#
+# THREE-VALUED THROUGHOUT. `pass` is True, False, or None, and None means "we
+# could not measure this", which is never the same as failing it. A rookie with
+# no NFL season has no prior snap share; he is unknown, not disqualified. That
+# rule is why `_kleene` exists instead of plain `and`.
+# ---------------------------------------------------------------------------
+def _kleene(*vals):
+    """AND over True/False/None where None is 'unknown', not 'false'.
+
+    False wins over unknown -- if any part is definitely false the whole thing
+    is false however much of the rest is missing. Unknown wins over true.
+    """
+    if any(v is False for v in vals):
+        return False
+    if any(v is None for v in vals):
+        return None
+    return True
+
+
+def _ge(val, bar):
+    """val >= bar, or None if we don't have val."""
+    return None if val is None or (isinstance(val, float) and np.isnan(val)) else bool(val >= bar)
+
+
+def _lw_gate(payload: list) -> None:
+    """Verdict, route, and the running count, from whatever checks were built."""
+    for q in payload:
+        checks = q.get("lw_checks") or []
+        paths = [c for c in checks if c.get("group") == "path"]
+        if not paths:
+            q["lw_gate"] = None
+            q["lw_gate_via"] = []
+        else:
+            q["lw_gate"] = (True if any(c["pass"] is True for c in paths)
+                            else False if all(c["pass"] is False for c in paths)
+                            else None)
+            q["lw_gate_via"] = [c["label"] for c in paths if c["pass"] is True]
+        # Kept for continuity, but the UI leads with the gate: once the rows are
+        # a disjunction plus supporting evidence, a flat "N of 4" is not a
+        # meaningful summary of them.
+        q["lw_score"] = sum(1 for c in checks if c["pass"] is True)
+        q["lw_max"] = sum(1 for c in checks if c["pass"] is not None)
+
+
+def _lw_checks_qb(payload: list, season: int, cfg) -> None:
+    """Heath's two paths plus two supporting rushing bars.
+
+    Published thresholds, not vibes, and deliberately a CHECKLIST rather than
+    another weighted factor: it answers "does he have the shape that wins
+    leagues", which is a different question from "how many points will he
+    score" and shouldn't be blended into it.
+
+    STRUCTURE MATTERS HERE. The first two rows are Heath's two paths, and he
+    states them as a DISJUNCTION, verbatim: "There are still exactly two paths
+    to success in drafting a QB after Round 10: have 100+ rush attempts; play
+    for a 'McShanahan' tree playcaller. Every late-round QB to make the playoffs
+    in 45%+ of ESPN leagues since 2021 fits one of these two criteria."
+
+    So they are a SCREEN, not a score. A pocket passer in a Shanahan offense
+    clears it outright; he is not half-qualified, and counting "1 of 4" at him
+    would invent a penalty the research does not contain. Clearing both paths is
+    not extra credit either -- Heath's claim is that one is enough. The two
+    remaining rows are supporting rushing evidence from elsewhere in the piece
+    and are marked as such, so the renderer can keep them visually subordinate.
+
+    Scope caveat, carried into the UI: the screen is stated for QBs drafted
+    AFTER ROUND 10. It is not a law about every QB, and it isn't applied as a
+    filter -- for an early-round QB it is context, not a verdict.
+    """
+    playcallers = qb_blend.playcallers()
+    for q in payload:
+        pace, rfpg = q.get("rush_att_pace"), q.get("rush_fpg")
+        pc = playcallers.get((season, q.get("team")))
+        mcs = (pc["tree"] == MCSHANAHAN) if pc else None
+        q["lw_checks"] = [{
+            "label": f"{RUSH_ATT_HIGH}+ rush att pace",
+            "pass": (pace >= RUSH_ATT_HIGH) if pace is not None else None,
+            "detail": (f"{pace:.0f} paced" if pace is not None else "no rushing history"),
+            "why": "Elite designed-and-scramble usage — the volume tier league winners live in.",
+            "group": "path",
+        }, {
+            "label": "McShanahan play-caller",
+            "pass": mcs,
+            "detail": (f"{pc['playcaller']} ({pc['role']})" if pc else "not tracked"),
+            "why": ("Drafted QBs in the Shanahan/McVay tree beat their ADP expectation by "
+                    f"{LW_BARS['QB']:.0f}+ pts/gm 22.2% of the time, vs 6.5% everywhere else."),
+            "group": "path",
+        }, {
+            "label": f"{RUSH_ATT_FLOOR}+ rush att pace",
+            "pass": (pace >= RUSH_ATT_FLOOR) if pace is not None else None,
+            "detail": (f"{pace:.0f} paced" if pace is not None else "—"),
+            "why": "Under this there's no rushing cushion — passing alone has to carry him.",
+            "group": "support",
+        }, {
+            "label": f"{RUSH_FPG_HIGH:.0f}+ rushing pts/gm",
+            "pass": (rfpg >= RUSH_FPG_HIGH) if rfpg is not None else None,
+            "detail": (f"{rfpg:.1f} pts/gm" if rfpg is not None else "—"),
+            "why": "The production side of the same edge: points he scores without throwing.",
+            "group": "support",
+        }]
+
+
+def _lw_checks_rb(payload: list, season: int, cfg) -> None:
+    """A cheap back who was already on the field, and the short-season warning.
+
+    Fitted here rather than quoted from anyone: 272 drafted back-seasons from
+    2020 to 2024, priced off the same FFC history the value curve uses, scored
+    against the same ADP expectation. A season under eight games is scored as
+    the miss it was rather than dropped, because dropping it would hide every
+    injury bust and make the screen look better than it is.
+
+    Both paths carry the price INSIDE them for the reason set out beside
+    RB_CHEAP_PICK: the role facts are worth well over a point a game to a cheap
+    back and slightly NEGATIVE to an expensive one. An early-round back reading
+    "misses both paths" is not a bug and not an insult to the player -- it is
+    the screen saying the market has already paid for what it looks for.
+
+    The last row is the one that goes the other way, so it is written as the
+    positive it is measured as: backs who played a full-ish season last year hit
+    at 13.8% against 7.7% for backs coming off eleven games or fewer.
+    """
+    facts = lw_facts.prior_facts("RB", season)
+    for q in payload:
+        f = facts.get(adp_mod.norm(q.get("name", ""))) or {}
+        pick, _src = _curve_pick(q)
+        cheap = None if pick is None else bool(pick > RB_CHEAP_PICK)
+        snap, tgt, gm = f.get("p_snap"), f.get("p_tgt_pg"), f.get("p_games")
+        yr = f.get("p_season")
+        price = "unpriced" if pick is None else f"pick {pick:.0f}"
+        q["lw_checks"] = [{
+            "label": "Cheap and already playing",
+            "pass": _kleene(cheap, _ge(snap, RB_SNAP_GATE)),
+            "detail": (f"{price}, {snap:.0%} of snaps in {yr}" if snap is not None
+                       else f"{price}, no snap history"),
+            "why": (f"Backs priced after pick {RB_CHEAP_PICK} who already played "
+                    f"{RB_SNAP_GATE:.0%} of the snaps beat their draft slot by "
+                    f"{LW_BARS['RB']:.0f}+ pts/gm 17.1% of the time, against 9.7% "
+                    "of other cheap backs. Among early-round backs the same fact "
+                    "is worth nothing — you're paying for it."),
+            "group": "path",
+        }, {
+            "label": "Cheap and catching passes",
+            "pass": _kleene(cheap, _ge(tgt, RB_TGT_GATE)),
+            "detail": (f"{price}, {tgt:.1f} targets/gm in {yr}" if tgt is not None
+                       else f"{price}, no target history"),
+            "why": (f"Same price line, receiving instead of snaps: {RB_TGT_GATE:.0f}+ "
+                    "targets a game last season, 16.3% against 9.5%. Pass work is the "
+                    "part of a back's role that survives a change of starter."),
+            "group": "path",
+        }, {
+            "label": f"Played {RB_FULL_SEASON}+ games last year",
+            "pass": _ge(gm, RB_FULL_SEASON),
+            "detail": (f"{gm} games in {yr}" if gm is not None else "no prior season"),
+            "why": ("Backs coming off eleven games or fewer hit at 5.8% against 13.2% "
+                    "for everyone else — the one warning sign that held up in four of "
+                    "five seasons. It does not decide the screen, it colours it."),
+            "group": "support",
+        }]
+
+
+def _lw_checks_te(payload: list, season: int, cfg) -> None:
+    """Incumbency, twice, plus draft capital as supporting evidence.
+
+    Fitted on 142 drafted tight-end seasons, 2020-2025. Both paths say the same
+    thing from different sides -- he was already the tight end his offense used
+    -- and that is the whole finding: at this position the job is the edge, and
+    the market keeps pricing the breakout instead of the incumbent.
+
+    Clearing either path was worth +1.18 pts/gm and a 20.3% hit rate against
+    8.4%, right in all six seasons. Worth knowing, and reported to the user
+    alongside it: OUR OWN BOARD shares some of the market's blind spot here.
+    Tight ends over the snap gate came in 1.5 pts/gm above our projection, not
+    just above their price, so this screen is telling us something the model has
+    not fully absorbed yet rather than merely explaining a ranking.
+    """
+    facts = lw_facts.prior_facts("TE", season)
+    draft = lw_facts.draft_capital()
+    for q in payload:
+        f = facts.get(adp_mod.norm(q.get("name", ""))) or {}
+        snap, xfp, yr = f.get("p_snap"), f.get("p_xfp_share"), f.get("p_season")
+        rd = (draft.get(str(q.get("player_id"))) or {}).get("round")
+        q["lw_checks"] = [{
+            "label": f"Played {TE_SNAP_GATE:.0%}+ of the snaps",
+            "pass": _ge(snap, TE_SNAP_GATE),
+            "detail": (f"{snap:.0%} in {yr}" if snap is not None else "no snap history"),
+            "why": (f"Tight ends who already played {TE_SNAP_GATE:.0%} of their team's "
+                    f"snaps beat their draft slot by {LW_BARS['TE']:.0f}+ pts/gm 22.0% "
+                    "of the time, against 9.9% of the rest — the strongest single fact "
+                    "at any position on this board."),
+            "group": "path",
+        }, {
+            "label": "Owns his tight end room",
+            "pass": _ge(xfp, TE_XFP_GATE),
+            "detail": (f"{xfp:.0%} of the room's expected points in {yr}"
+                       if xfp is not None else "no prior season"),
+            "why": (f"{TE_XFP_GATE:.0%}+ of everything his team's tight ends were "
+                    "projected to score on opportunity alone: 18.6% against 11.1%. "
+                    "Snaps say he was out there; this says the offense went to him."),
+            "group": "path",
+        }, {
+            "label": "First- or second-round NFL pick",
+            "pass": (None if rd is None else bool(rd <= TE_DRAFT_ROUND)),
+            "detail": (f"round {rd}" if rd is not None
+                       else "undrafted or not on file"),
+            "why": ("15.0% against 11.3%. Real but modest, and it is the one input here "
+                    "the team decided years ago — so it supports the verdict rather "
+                    "than driving it."),
+            "group": "support",
+        }]
+
+
 def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
            adp_df: pd.DataFrame, cfg, pos: str = "QB") -> dict:
     payload = result.get("payload", [])
@@ -701,6 +971,10 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
     S = _settings(pos)
     boom1, boom2 = S["boom"]
     repl_rank = S["repl"]
+    # How far a player has to beat his price by before we call him a league
+    # winner. One bar per position, because a tight end scores about half what a
+    # quarterback does and a five-point edge is a different animal at each.
+    lw_bar = LW_BARS.get(pos, LW_FPG_EDGE)
 
     gl = _game_fp(weekly, scoring_rules, pos)
     latest = int(gl["season"].max()) if not gl.empty else int(getattr(cfg, "CURRENT_SEASON", 2025))
@@ -856,108 +1130,39 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
         q["exp_fpg"] = round(exp, 1)
         q["value_fpg"] = round(edge, 1)
         q["value_fpg_src"] = src
-        q["value_fpg_tag"] = ("League winner" if edge >= LW_FPG_EDGE
+        q["value_fpg_tag"] = ("League winner" if edge >= lw_bar
                               else "Value" if edge >= VAL_FPG_EDGE
                               else "Pricey" if edge <= OVERPRICED_FPG else None)
 
-    # ---- League-winner checklist (QUARTERBACKS ONLY) -----------------------
-    # Every threshold below is a quarterback threshold. The running-back version
-    # of this screen -- first four seasons in the league or already a previous
-    # league-winner, plus the archetype curve -- needs the contract and XFP-share
-    # data that tier 2 brings in, so for now an RB board simply carries no gate
-    # rather than being graded against bars that were never about backs.
-    if pos != "QB":
-        for q in payload:
-            q["lw_gate"] = None
-            q["lw_gate_via"] = []
-            q["lw_checks"] = []
-            q["lw_score"] = 0
-            q["lw_max"] = 0
-        _flags(payload, pos, S)
-        result["ratings_meta"] = {
-            "adp_source": adp_mod.source_label(adp_df, pos),
-            "pos": pos,
-            "boom": [int(boom1), int(boom2)],
-            "repl_rank": int(repl_rank),
-            "teams": int(getattr(cfg, "LEAGUE", {}).get("teams", 12) or 12),  # see note below
-            "n_with_adp": sum(1 for q in payload if q.get("adp_pos_rank")),
-            "curve": curve or None,
-            "lw_bars": {"fpg": LW_FPG_EDGE, "value_fpg": VAL_FPG_EDGE},
-        }
-        return result
-
-    # Published thresholds, not vibes. Deliberately a CHECKLIST and not another
-    # weighted factor: it answers "does he have the shape that wins leagues",
-    # which is a different question from "how many points will he score" and
-    # shouldn't be blended into it.
+    # ---- League-winner checklist -------------------------------------------
+    # Three boards carry one now. The quarterback screen is Heath's, quoted; the
+    # running-back and tight-end screens are ours, fitted on the same historical
+    # ADP the value curve above is fitted on, and every hit rate printed on the
+    # page is a number out of that fit rather than a number anyone asserted.
     #
-    # STRUCTURE MATTERS HERE. The first two rows are Ryan Heath's two paths, and
-    # he states them as a DISJUNCTION, verbatim: "There are still exactly two
-    # paths to success in drafting a QB after Round 10: have 100+ rush attempts;
-    # play for a 'McShanahan' tree playcaller. Every late-round QB to make the
-    # playoffs in 45%+ of ESPN leagues since 2021 fits one of these two criteria."
+    # The receiver board deliberately has none. Its two screens -- the route gate
+    # and the first-down badge -- already live in `wr_flags` and already drive a
+    # filter, and nothing that was tried on top of them survived the robustness
+    # gate, so an empty checklist here is a finding rather than an oversight.
     #
-    # So they are a SCREEN, not a score. A pocket passer in a Shanahan offense
-    # clears it outright; he is not half-qualified, and counting "1 of 4" at him
-    # would invent a penalty the research does not contain. Clearing both paths
-    # is not extra credit either -- Heath's claim is that one is enough. The two
-    # remaining rows are supporting rushing evidence from elsewhere in the piece
-    # and are marked as such, so the renderer can keep them visually subordinate.
-    #
-    # Scope caveat, carried into the UI: the screen is stated for QBs drafted
-    # AFTER ROUND 10. It is not a law about every QB, and it isn't applied as a
-    # filter -- for an early-round QB it is context, not a verdict.
+    # Whatever is built, the shape is identical: a list of alternative PATHS,
+    # any one of which clears the screen, plus SUPPORT rows the reader can see
+    # but that never decide the verdict. `_lw_gate` reads that shape and is the
+    # only place the verdict is computed.
     season = int(getattr(cfg, "UPCOMING_SEASON", latest + 1))
-    playcallers = qb_blend.playcallers()
-    for q in payload:
-        pace, rfpg = q.get("rush_att_pace"), q.get("rush_fpg")
-        pc = playcallers.get((season, q.get("team")))
-        mcs = (pc["tree"] == MCSHANAHAN) if pc else None
-        checks = [{
-            "label": f"{RUSH_ATT_HIGH}+ rush att pace",
-            "pass": (pace >= RUSH_ATT_HIGH) if pace is not None else None,
-            "detail": (f"{pace:.0f} paced" if pace is not None else "no rushing history"),
-            "why": "Elite designed-and-scramble usage — the volume tier league winners live in.",
-            "group": "path",
-        }, {
-            "label": "McShanahan play-caller",
-            "pass": mcs,
-            "detail": (f"{pc['playcaller']} ({pc['role']})" if pc else "not tracked"),
-            "why": ("Drafted QBs in the Shanahan/McVay tree beat their ADP expectation by "
-                    f"{LW_FPG_EDGE:.0f}+ pts/gm 22.2% of the time, vs 6.5% everywhere else."),
-            "group": "path",
-        }, {
-            "label": f"{RUSH_ATT_FLOOR}+ rush att pace",
-            "pass": (pace >= RUSH_ATT_FLOOR) if pace is not None else None,
-            "detail": (f"{pace:.0f} paced" if pace is not None else "—"),
-            "why": "Under this there's no rushing cushion — passing alone has to carry him.",
-            "group": "support",
-        }, {
-            "label": f"{RUSH_FPG_HIGH:.0f}+ rushing pts/gm",
-            "pass": (rfpg >= RUSH_FPG_HIGH) if rfpg is not None else None,
-            "detail": (f"{rfpg:.1f} pts/gm" if rfpg is not None else "—"),
-            "why": "The production side of the same edge: points he scores without throwing.",
-            "group": "support",
-        }]
-        paths = [c for c in checks if c["group"] == "path"]
-        # None means "we couldn't measure it", which is NOT the same as False. A QB
-        # only fails the screen when both paths were actually measured and both said
-        # no; if either is unknown he stays unknown rather than being condemned on
-        # missing data.
-        q["lw_gate"] = (True if any(c["pass"] is True for c in paths)
-                        else False if all(c["pass"] is False for c in paths) else None)
-        q["lw_gate_via"] = [c["label"] for c in paths if c["pass"] is True]
-        q["lw_checks"] = checks
-        # Kept for continuity, but the UI leads with the gate: once the rows are a
-        # disjunction plus supporting evidence, a flat "N of 4" is not a meaningful
-        # summary of them.
-        q["lw_score"] = sum(1 for c in checks if c["pass"] is True)
-        q["lw_max"] = sum(1 for c in checks if c["pass"] is not None)
+    builder = {"QB": _lw_checks_qb, "RB": _lw_checks_rb,
+               "TE": _lw_checks_te}.get(pos)
+    if builder is None:
+        for q in payload:
+            q["lw_checks"] = []
+    else:
+        builder(payload, season, cfg)
+    _lw_gate(payload)
 
     # cheat-sheet "why" flags -- transparent, factor-based reasons, tone-coded.
     _flags(payload, pos, S)
 
-    result["ratings_meta"] = {
+    meta = {
         "adp_source": adp_mod.source_label(adp_df, pos),
         "pos": pos,
         "boom": [int(boom1), int(boom2)],
@@ -970,8 +1175,19 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
         "teams": int(getattr(cfg, "LEAGUE", {}).get("teams", 12) or 12),
         "n_with_adp": sum(1 for q in payload if q.get("adp_pos_rank")),
         "curve": curve or None,
-        "lw_bars": {"fpg": LW_FPG_EDGE, "value_fpg": VAL_FPG_EDGE,
-                    "att_floor": RUSH_ATT_FLOOR, "att_high": RUSH_ATT_HIGH,
-                    "rush_fpg": RUSH_FPG_HIGH},
+        # `fpg` is this board's own bar, not the quarterback one -- see LW_BARS.
+        "lw_bars": {"fpg": lw_bar, "value_fpg": VAL_FPG_EDGE},
     }
+    if pos == "QB":
+        meta["lw_bars"].update({"att_floor": RUSH_ATT_FLOOR,
+                                "att_high": RUSH_ATT_HIGH,
+                                "rush_fpg": RUSH_FPG_HIGH})
+    elif pos == "RB":
+        meta["lw_bars"].update({"cheap_pick": RB_CHEAP_PICK,
+                                "snap": RB_SNAP_GATE, "tgt_pg": RB_TGT_GATE,
+                                "full_season": RB_FULL_SEASON})
+    elif pos == "TE":
+        meta["lw_bars"].update({"snap": TE_SNAP_GATE, "xfp_share": TE_XFP_GATE,
+                                "draft_round": TE_DRAFT_ROUND})
+    result["ratings_meta"] = meta
     return result

@@ -545,22 +545,67 @@ def calibrate(p: pd.DataFrame, info: dict | None = None) -> tuple[float, float]:
     return calibration.fit(p, pos="QB", info=info)
 
 
+BACKTEST_SEASONS = 3
+
+
 def backtest(p: pd.DataFrame) -> dict:
-    """Fit on earlier seasons, score the two most recent, vs a prior-year baseline."""
-    seasons = sorted(int(s) for s in p["season"].dropna().unique())
-    if len(seasons) < 3:
+    """Walk forward a season at a time; beat last year's points per game or don't.
+
+    Carries the same three fixes the running-back board just got, because it had
+    the same three faults. It claimed to test two seasons and tested one --
+    `seasons[-2:]` returned [2025, 2026] and 2026 has not been played. It scored
+    every quarterback in the panel including third-stringers nobody drafts. And
+    it only ever asked about level, never about order, which is the thing a board
+    is actually read in.
+
+    The quarterback error will still look enormous beside the receivers'. That is
+    the position, not the model: a quarterback scores about twenty points a game
+    and a receiver about ten, so the same proportional miss is twice the number.
+    Compare a board against ITS OWN baseline, never against another position's.
+    """
+    d = p[p["actual_ppg"].notna() & p["composite"].notna()]
+    if d.empty:
         return {}
-    test = seasons[-2:]
-    tr = p[(~p["season"].isin(test)) & p["actual_ppg"].notna()]
-    if len(tr) < 5:
+    picks = calibration.drafted_picks("QB")
+    if not picks:
         return {}
-    b, a = np.polyfit(tr["composite"], tr["actual_ppg"], 1)
-    te = p[p["season"].isin(test) & p["actual_ppg"].notna()].copy()
-    te["pred"] = a + b * te["composite"]
-    mae_model = float(np.mean(np.abs(te["pred"] - te["actual_ppg"])))
-    base = te.dropna(subset=["prev_ppg"])
-    mae_base = float(np.mean(np.abs(base["prev_ppg"] - base["actual_ppg"]))) if len(base) else float("nan")
-    return {"seasons": test, "model_mae": round(mae_model, 2), "baseline_mae": round(mae_base, 2)}
+    from .adp import norm as _adp_norm
+    d = d.copy()
+    d["_drafted"] = [(int(s), _adp_norm(n)) in picks
+                     if pd.notna(n) and pd.notna(s) else False
+                     for s, n in zip(d["season"], d["player_name"])]
+    have = sorted({int(s) for s in d.loc[d["_drafted"], "season"].unique()})
+    if not have:
+        return {}
+    tested, chunks = [], []
+    for s in have[-BACKTEST_SEASONS:]:
+        train = d[d["season"] < s]
+        test = d[(d["season"] == s) & d["_drafted"]]
+        if len(train) < calibration.MIN_ROWS or test.empty:
+            continue
+        info: dict = {}
+        a, b = calibration.fit(train, pos="QB", info=info)
+        test = test.copy()
+        test["_pred"] = calibration.apply(test["composite"], a, b,
+                                          info.get("knots") or [])
+        chunks.append(test)
+        tested.append(s)
+    if not chunks:
+        return {}
+    t = pd.concat(chunks, ignore_index=True)
+    mae = float(np.mean(np.abs(t["_pred"] - t["actual_ppg"])))
+    base = t.dropna(subset=["prev_ppg"])
+    mae_base = (float(np.mean(np.abs(base["prev_ppg"] - base["actual_ppg"])))
+                if len(base) else float("nan"))
+    rho = t["_pred"].corr(t["actual_ppg"], method="spearman")
+    rho_b = (base["prev_ppg"].corr(base["actual_ppg"], method="spearman")
+             if len(base) else float("nan"))
+    return {"n": int(len(t)), "model_mae": round(mae, 2),
+            "baseline_mae": round(mae_base, 2),
+            "model_rho": round(float(rho), 3) if pd.notna(rho) else None,
+            "baseline_rho": round(float(rho_b), 3) if pd.notna(rho_b) else None,
+            "population": "drafted quarterbacks",
+            "seasons": tested}
 
 
 # ---------------------------------------------------------------------------
