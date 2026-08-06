@@ -131,6 +131,62 @@ HI_DAMP = 0.5
 
 
 # ---------------------------------------------------------------------------
+# The fifth bug: one player was setting the ceiling of the board
+# ---------------------------------------------------------------------------
+# `_knots` lines up sorted composites against sorted targets, so the single
+# highest composite gets handed the single highest target. That target is
+# `ca + cb*log(pick)` evaluated at the earliest pick anybody in the fit crowd was
+# ever drafted at -- the most extrapolated number in the whole fit, sitting on
+# the part of the log curve that runs away fastest. Whatever noise is in that one
+# point becomes the top of the board, and because everything below it is
+# interpolated toward it, it stretches the whole elite tier.
+#
+# The fix is the smallest one that addresses exactly that: the top knot may not
+# rise faster than the segment immediately below it did. Below the top knot
+# nothing changes, `apply` is untouched, and no new number is invented.
+#
+# What it actually did, walk-forward, three seasons, drafted players (paired
+# bootstrap against the shipped curve, positive = better):
+#   QB  0.000        the cap never binds -- QB's crowd contains nobody drafted
+#   RB  0.000        inside pick 12, so its top knot was never an extrapolation
+#   WR  +0.035  94%
+#   TE  +0.045  96%
+# Spearman correlation moves by at most 0.001 anywhere, which is the design
+# requirement in this file's docstring: nothing here re-orders anybody.
+CAP_TOP_KNOT = True
+
+
+# ---------------------------------------------------------------------------
+# The sixth bug: the board always claimed exactly the market's spread
+# ---------------------------------------------------------------------------
+# Because `_knots` is a quantile-to-quantile map, the board comes out with the
+# same spread as the target curve by construction -- and the target curve is the
+# draft market's own price curve. So the board claims precisely as much spread as
+# ADP claims, however well or badly our composite actually ranks players.
+#
+# That is only right when our ordering is as good as the market's. When it is
+# worse, the honest forecast has LESS spread. The optimal rescaling of a
+# rank-matched forecast is exactly r_composite / r_pick, and both of those are
+# already measured on these very rows a few lines above -- the file was computing
+# them and then not acting on them.
+#
+# Applied everywhere it makes three of the four boards worse, so it is not
+# applied everywhere. It is applied where the evidence says the board really does
+# claim more spread than materialises. Regressing what happened on what we said
+# would happen (1.0 = the claimed spread shows up):
+#   QB 0.767 +/- 0.192   1.2 se below 1 -- not significant
+#   RB 0.634 +/- 0.099   3.7 se below 1 -- the one real offender
+#   WR 0.983 +/- 0.091   already right
+#   TE 0.869 +/- 0.062   2.1 se below 1, and CAP_TOP_KNOT alone takes it to 0.97
+# RB after shrinking is 0.699 -- still under 1, so this is under-corrected, not
+# over-corrected. Walk-forward: +0.057 points a game, better in 99% of bootstrap
+# resamples, top-12 error 3.53 -> 3.31, top-12 bias +1.77 -> +1.29, Spearman
+# unchanged at 0.543. The shrink factor is derived, never tuned: RB's works out
+# to 0.889. Add a position here only on that same evidence.
+SHRINK_TO_SKILL = ("RB",)
+
+
+# ---------------------------------------------------------------------------
 # The fourth bug: the weights were never the weights
 # ---------------------------------------------------------------------------
 # The other three bugs in this file are about the conversion from composite to
@@ -335,6 +391,15 @@ def _knots(c: np.ndarray, target: np.ndarray, tail_c=None, tail_y=None):
     idx = np.unique(np.linspace(0, len(cs) - 1, N_KNOTS).round().astype(int))
     kx, ky = list(cs[idx]), list(ts[idx])
 
+    # ---- bug 5: don't let the most extrapolated point set the ceiling ------
+    # The top knot may keep rising, just not faster than the segment below it
+    # was already rising. It is a cap, never a lift, so a board whose top knot
+    # was already in line with the rest comes through this untouched -- which is
+    # what happens at QB and RB, where it is a measured no-op.
+    if CAP_TOP_KNOT and len(ky) >= 3 and kx[-2] > kx[-3]:
+        m = (ky[-2] - ky[-3]) / (kx[-2] - kx[-3])
+        ky[-1] = min(ky[-1], ky[-2] + m * (kx[-1] - kx[-2]))
+
     if tail_c is not None and tail_y is not None and tail_c < kx[0]:
         # Only below the first bend, and only if it doesn't reverse the slope --
         # an anchor above the drafted floor would re-order the bottom of the board.
@@ -427,6 +492,18 @@ def fit(p: pd.DataFrame, pos: str = "RB",
     if cb >= 0:
         return a, b
     target = ca + cb * lp
+
+    # ---- bug 6: only claim the spread our own ordering has earned ----------
+    # Pull the target curve toward its own mean by r_composite / r_pick. Nothing
+    # is estimated here that wasn't already estimated four lines up, and the
+    # ordering is untouched -- every player moves toward the middle by the same
+    # proportion, so nobody passes anybody.
+    lam = 1.0
+    if pos in SHRINK_TO_SKILL and r_pick > 1e-9:
+        lam = float(np.clip(abs(r_comp) / r_pick, 0.0, 1.0))
+        target = target.mean() + lam * (target - target.mean())
+    info["skill_shrink"] = round(lam, 3)
+
     tail_c = tail_y = None
     if undrafted is not None and len(undrafted) >= 10:
         tail_c = float(np.percentile(undrafted["composite"].to_numpy("float64"), 5))
