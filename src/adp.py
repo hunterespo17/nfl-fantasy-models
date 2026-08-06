@@ -55,6 +55,14 @@ _ALIAS = {
     # each name to the other would just swap them and they would still miss.
     "hollywood brown": "marquise brown",
     "joshua palmer": "josh palmer",
+    # Same failure as the one above, on a tight end. nflverse has him as "Chig
+    # Okonkwo"; the deeper of the two historical ADP sources spells him out in
+    # full for 2022-24 and short for 2025, so three of his four seasons were
+    # silently falling out of the TE expectation curve -- drafted, played a full
+    # year, counted as "never played". Map the long form onto the nflverse
+    # spelling, not the other way round, because the stats side is the one we
+    # cannot edit.
+    "chigoziem okonkwo": "chig okonkwo",
 }
 
 
@@ -110,11 +118,42 @@ def for_pos(adp_df: pd.DataFrame, pos: str | None) -> pd.DataFrame:
     return adp_df[adp_df["pos"] == str(pos).upper()]
 
 
+def _min_platform_rows() -> int:
+    """How many players a site must price before its ranks mean anything.
+
+    One starter per team: in a 12-team league a site that prices eleven tight
+    ends has not seen a full round of them, and calling its cheapest one "TE1"
+    is a statement about its own thin list rather than about the market.
+    """
+    try:
+        return max(2, int(config.LEAGUE.get("teams", 12)))
+    except Exception:  # noqa: BLE001
+        return 12
+
+
 def has_platforms(adp_df: pd.DataFrame) -> list[str]:
-    """Which platforms actually carry any data."""
+    """Which platforms carry ENOUGH data on this slice to be worth ranking.
+
+    Callers always hand this one position's rows (see for_pos), so "enough" is
+    per position -- and it has to be, because coverage is wildly uneven. The
+    test used to be `.notna().any()`, which is one player. That is how Sleeper
+    came to price exactly two tight ends in the file and have the cheaper of
+    them, Harold Fannin Jr., printed on the board as Sleeper's TE1. He is TE7
+    on ESPN, TE7 on Underdog and TE6 on FFC. The rank was not wrong about the
+    arithmetic -- he really was the first of the two -- it was wrong about what
+    it was counting, which is worse, because a positional rank looks like a
+    market opinion and this one was an artefact of a missing feed.
+
+    So a site now has to price a full round of the position (one starter per
+    team) before it earns a column, a rank, or a vote in the consensus. Below
+    that the column is dropped entirely rather than shown half-empty: a missing
+    site reads as missing, a two-player site reads as a market.
+    """
     if adp_df is None or adp_df.empty:
         return []
-    return [pf for pf in PLATFORMS if pf in adp_df.columns and adp_df[pf].notna().any()]
+    floor = _min_platform_rows()
+    return [pf for pf in PLATFORMS
+            if pf in adp_df.columns and int(adp_df[pf].notna().sum()) >= floor]
 
 
 def platform_pos_ranks(adp_df: pd.DataFrame, pos: str | None = DEFAULT_POS) -> dict:
