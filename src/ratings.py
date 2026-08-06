@@ -39,6 +39,7 @@ import pandas as pd
 from . import adp as adp_mod
 from . import calibration
 from . import lw_facts
+from . import outcomes
 from . import qb_blend
 from . import scoring
 
@@ -1161,6 +1162,12 @@ def attach(result: dict, weekly: pd.DataFrame, scoring_rules: dict | None,
 
     # cheat-sheet "why" flags -- transparent, factor-based reasons, tone-coded.
     _flags(payload, pos, S)
+
+    # The measured range of outcomes around each projection. Runs last because it
+    # reads `rank`, `proj_total` and the two risk scores, all of which are settled
+    # by this point. See src/outcomes.py for where the numbers come from and for
+    # why availability lands in the WIDTH of the range rather than in the middle.
+    outcomes.attach(payload, pos)
 
     meta = {
         "adp_source": adp_mod.source_label(adp_df, pos),

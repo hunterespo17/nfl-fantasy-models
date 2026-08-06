@@ -2,19 +2,19 @@ player,pos,sleeper,underdog,espn,ffc
 Josh Allen,QB,28.2,36.0,22.6,21.4
 Lamar Jackson,QB,37.9,55.4,39.9,50.6
 Drake Maye,QB,51.2,66.9,48.0,63.3
-Joe Burrow,QB,57.1,68.6,60.1,45.2
-Jayden Daniels,QB,62.1,67.9,52.0,78.3
-Jalen Hurts,QB,67.2,71.6,54.6,89.5
+Joe Burrow,QB,57.1,68.6,60.2,45.2
+Jayden Daniels,QB,62.1,67.9,51.9,78.3
+Jalen Hurts,QB,67.2,71.6,54.7,89.5
 Jaxson Dart,QB,80.6,101.3,74.9,120.3
-Caleb Williams,QB,82.9,72.5,91.9,99.9
-Justin Herbert,QB,83.7,82.8,108.7,79.2
+Caleb Williams,QB,82.9,72.5,92.0,99.9
+Justin Herbert,QB,83.7,82.8,108.8,79.2
 Dak Prescott,QB,90.3,80.4,88.0,62.1
 Trevor Lawrence,QB,92.3,85.7,95.5,87.3
 Patrick Mahomes,QB,100.1,95.6,105.9,95.1
 Brock Purdy,QB,103.5,100.2,103.9,91.6
 Matthew Stafford,QB,115.2,106.0,78.8,99.1
 Bo Nix,QB,118.7,106.6,91.8,125.1
-Jared Goff,QB,122.0,109.7,140.2,103.1
+Jared Goff,QB,122.0,109.7,140.3,103.1
 Jordan Love,QB,124.8,113.7,159.3,134.1
 Malik Willis,QB,137.8,135.5,167.0,
 Baker Mayfield,QB,140.9,119.2,148.8,136.6
@@ -145,29 +145,29 @@ Breece Hall,RB,32.3,29.6,37.9,25.8
 Bucky Irving,RB,34.4,55.5,54.9,40.2
 Travis Etienne Jr.,RB,36.7,41.4,49.2,38.7
 Javonte Williams,RB,38.3,36.2,38.5,35.4
-TreVeyon Henderson,RB,47.8,53.9,69.9,56.0
+TreVeyon Henderson,RB,47.8,53.9,70.0,56.0
 Cam Skattebo,RB,48.7,43.4,42.5,32.4
-Quinshon Judkins,RB,55.0,53.7,53.7,46.9
-David Montgomery,RB,56.3,48.5,74.3,61.6
-Bhayshul Tuten,RB,60.4,49.7,78.1,50.1
+Quinshon Judkins,RB,55.0,53.7,53.8,46.9
+David Montgomery,RB,56.3,48.5,74.4,61.6
+Bhayshul Tuten,RB,60.4,49.7,78.2,50.1
 D'Andre Swift,RB,65.1,49.6,72.1,43.3
-RJ Harvey,RB,68.4,86.6,127.2,90.6
-Jaylen Warren,RB,74.8,71.5,103.4,76.1
-Chuba Hubbard,RB,74.9,84.5,113.0,75.7
-Jadarian Price,RB,80.3,62.2,79.8,58.7
+RJ Harvey,RB,68.4,86.6,127.3,90.6
+Jaylen Warren,RB,74.8,71.5,103.5,76.1
+Chuba Hubbard,RB,74.9,84.5,113.1,75.7
+Jadarian Price,RB,80.3,62.2,79.9,58.7
 Rhamondre Stevenson,RB,82.7,75.2,112.0,73.2
-Tony Pollard,RB,85.6,75.6,89.2,66.5
-Rico Dowdle,RB,88.1,87.7,108.6,71.8
+Tony Pollard,RB,85.6,75.6,89.3,66.5
+Rico Dowdle,RB,88.1,87.7,108.7,71.8
 Kyle Monangai,RB,89.5,97.0,132.5,98.5
 J.K. Dobbins,RB,92.5,98.4,122.8,83.8
-Blake Corum,RB,98.3,90.7,138.9,114.2
+Blake Corum,RB,98.3,90.7,139.0,114.2
 Kenny Gainwell,RB,106.9,106.9,121.7,102.6
 Aaron Jones Sr.,RB,108.8,123.4,122.1,89.9
 Jacory Croskey-Merritt,RB,114.9,116.6,141.7,109.5
 Brian Robinson Jr.,RB,123.8,176.7,167.3,146.3
 Zach Charbonnet,RB,125.8,161.6,149.1,129.7
 Rachaad White,RB,127.2,109.1,126.0,100.9
-Jordan Mason,RB,130.5,110.1,156.1,119.2
+Jordan Mason,RB,130.5,110.1,156.2,119.2
 Tyler Allgeier,RB,132.5,155.1,169.4,159.6
 Jonathon Brooks,RB,138.0,90.4,127.5,122.9
 Woody Marks,RB,141.2,141.5,150.6,143.7
@@ -177,11 +177,11 @@ Tyrone Tracy Jr.,RB,145.3,134.4,167.4,155.8
 Emmett Johnson,RB,149.7,198.5,170.0,
 Tyjae Spears,RB,151.9,153.5,168.6,139.6
 James Conner,RB,152.2,214.6,170.2,
-Alvin Kamara,RB,157.7,163.6,156.4,142.6
+Alvin Kamara,RB,157.7,163.6,156.5,142.6
 Keaton Mitchell,RB,164.9,134.0,170.8,157.2
-Dylan Sampson,RB,166.4,171.9,171.0,
-Isiah Pacheco,RB,167.2,152.2,157.7,143.5
-Braelon Allen,RB,174.1,213.2,170.5,
+Dylan Sampson,RB,166.4,171.9,170.9,
+Isiah Pacheco,RB,167.2,152.2,157.8,143.5
+Braelon Allen,RB,174.1,213.2,170.4,
 Mike Washington Jr.,RB,179.1,197.8,170.3,168.3
 Kimani Vidal,RB,181.1,212.9,170.3,
 Kaytron Allen,RB,181.2,205.5,170.3,
@@ -369,16 +369,16 @@ Trey McBride,TE,18.7,29.1,19.2,43.6
 Brock Bowers,TE,20.2,19.6,23.5,45.7
 Colston Loveland,TE,41.2,45.8,45.5,65.9
 Tyler Warren,TE,50.1,64.1,47.1,71.7
-Harold Fannin Jr.,TE,62.6,102.3,76.2,82.2
+Harold Fannin Jr.,TE,62.6,102.3,76.3,82.2
 Tucker Kraft,TE,67.3,79.2,99.3,113.5
-Kyle Pitts Sr.,TE,71.3,103.7,65.9,81.9
+Kyle Pitts Sr.,TE,71.3,103.7,66.0,81.9
 Sam LaPorta,TE,76.4,91.7,67.4,94.6
 Oronde Gadsden,TE,94.7,153.1,169.4,
 Dalton Kincaid,TE,97.1,126.4,136.5,152.4
-George Kittle,TE,97.4,114.8,96.1,132.2
-Jake Ferguson,TE,104.0,131.8,112.1,154.4
+George Kittle,TE,97.4,114.8,96.2,132.2
+Jake Ferguson,TE,104.0,131.8,112.2,154.4
 Hunter Henry,TE,106.2,152.8,142.2,136.9
-Travis Kelce,TE,107.1,121.4,102.2,113.9
+Travis Kelce,TE,107.1,121.4,102.3,113.9
 Dallas Goedert,TE,109.1,134.7,102.2,101.5
 Mark Andrews,TE,110.7,126.4,122.7,128.7
 Isaiah Likely,TE,117.3,127.8,128.6,135.5
@@ -401,7 +401,7 @@ Max Klare,TE,248.8,,170.0,
 Greg Dulcich,TE,,179.1,170.5,
 Pat Freiermuth,TE,,194.0,169.0,
 Mike Gesicki,TE,,207.7,170.8,
-Evan Engram,TE,,212.1,170.7,
+Evan Engram,TE,,212.1,170.6,
 Charlie Kolar,TE,,214.6,170.0,
 Darnell Washington,TE,,215.0,169.6,
 Michael Mayer,TE,,215.1,170.1,
@@ -573,7 +573,7 @@ CeeDee Lamb,WR,10.6,9.6,10.6,13.4
 Justin Jefferson,WR,12.4,10.4,12.0,14.4
 Drake London,WR,14.1,21.1,19.0,10.5
 A.J. Brown,WR,19.4,18.7,27.0,18.8
-Rashee Rice,WR,22.7,25.1,22.7,13.0
+Rashee Rice,WR,22.7,25.1,22.6,13.0
 George Pickens,WR,23.1,23.5,28.1,20.9
 Nico Collins,WR,25.2,22.7,27.7,23.1
 Chris Olave,WR,26.4,30.3,35.1,22.9
@@ -588,17 +588,17 @@ DeVonta Smith,WR,44.9,27.5,38.9,32.4
 Emeka Egbuka,WR,45.8,31.5,44.1,33.1
 Jaylen Waddle,WR,46.2,39.0,59.3,51.3
 Davante Adams,WR,46.9,51.3,46.7,40.0
-Jameson Williams,WR,51.6,52.1,66.7,41.9
+Jameson Williams,WR,51.6,52.1,66.8,41.9
 Terry McLaurin,WR,56.6,44.9,61.3,42.6
-Mike Evans,WR,57.8,48.2,90.8,61.1
+Mike Evans,WR,57.8,48.2,90.9,61.1
 DJ Moore,WR,59.3,55.8,70.7,49.4
 Carnell Tate,WR,62.9,59.5,69.5,74.0
 Rome Odunze,WR,64.2,59.9,71.6,44.5
 Christian Watson,WR,68.4,57.3,100.6,64.4
 Jordyn Tyson,WR,69.0,64.1,97.9,84.8
-Brian Thomas Jr.,WR,69.6,62.5,104.3,77.0
+Brian Thomas Jr.,WR,69.6,62.5,104.4,77.0
 DK Metcalf,WR,74.4,76.1,87.7,64.7
-Marvin Harrison Jr.,WR,75.8,68.4,91.1,62.7
+Marvin Harrison Jr.,WR,75.8,68.4,91.2,62.7
 Makai Lemon,WR,76.6,74.0,113.0,99.8
 Courtland Sutton,WR,77.9,84.6,85.4,58.5
 Michael Wilson,WR,80.2,94.0,103.8,89.5
@@ -613,18 +613,18 @@ Wan'Dale Robinson,WR,103.0,111.4,116.0,79.2
 Romeo Doubs,WR,115.3,116.5,150.1,103.5
 Jayden Reed,WR,116.0,81.7,139.3,88.2
 Josh Downs,WR,125.1,86.3,122.8,101.8
-Stefon Diggs,WR,125.9,125.4,163.9,
+Stefon Diggs,WR,125.9,125.4,163.7,
 Jayden Higgins,WR,131.1,121.9,158.7,134.6
 Khalil Shakir,WR,133.8,127.0,135.7,100.9
 Matthew Golden,WR,134.1,107.6,106.8,111.2
-Xavier Worthy,WR,134.9,100.7,134.3,96.4
+Xavier Worthy,WR,134.9,100.7,134.4,96.4
 Jalen Coker,WR,136.3,127.5,159.5,122.0
 KC Concepcion,WR,143.2,117.4,147.3,127.2
 Jauan Jennings,WR,146.3,156.4,169.9,137.3
 Denzel Boston,WR,147.5,152.8,167.4,155.2
 Omar Cooper Jr.,WR,149.3,145.4,169.9,159.8
 Rashid Shaheed,WR,152.2,130.3,156.0,106.1
-Travis Hunter,WR,160.2,141.2,116.4,161.0
+Travis Hunter,WR,160.2,141.2,116.3,161.0
 Jalen McMillan,WR,163.7,146.7,167.1,140.4
 Deebo Samuel Sr.,WR,164.3,135.7,136.4,93.9
 Jalen Nailor,WR,166.5,148.7,169.7,136.7
@@ -641,22 +641,22 @@ Ja'Kobi Lane,WR,197.8,209.1,169.4,
 Isaac TeSlaa,WR,198.6,169.3,170.4,
 Elic Ayomanor,WR,199.8,215.7,170.0,
 De'Zhaun Stribling,WR,202.4,143.0,168.9,162.0
-Tank Dell,WR,206.7,183.7,168.8,140.3
+Tank Dell,WR,206.7,183.7,168.7,140.3
 Tre Tucker,WR,207.2,156.6,167.9,132.7
 Jaylin Noel,WR,213.7,215.1,171.5,
 Marvin Mims Jr.,WR,219.5,215.8,170.1,
 Germie Bernard,WR,220.8,194.8,170.4,
 Darnell Mooney,WR,221.1,201.4,170.6,
 Kyle Williams,WR,222.1,,169.9,
-Pat Bryant,WR,222.5,202.8,171.5,
-Ted Hurst III,WR,223.5,205.6,170.2,
+Pat Bryant,WR,222.5,202.8,171.4,
+Ted Hurst III,WR,223.5,205.6,170.3,
 Ryan Flournoy,WR,227.6,163.1,170.0,
 Calvin Ridley,WR,227.7,188.7,167.1,118.5
 Tory Horton,WR,228.7,212.5,171.2,
 Elijah Sarratt,WR,229.2,210.9,170.1,
 Chimere Dike,WR,229.4,215.8,171.1,
 Chris Bell,WR,231.4,215.1,171.2,
-Rashod Bateman,WR,232.7,202.8,171.0,131.1
+Rashod Bateman,WR,232.7,202.8,170.9,131.1
 Keenan Allen,WR,233.2,206.6,170.0,
 Keon Coleman,WR,234.8,211.0,170.1,
 Cooper Kupp,WR,235.2,209.1,169.0,150.9
@@ -665,7 +665,7 @@ Devaughn Vele,WR,239.8,214.9,171.3,
 Christian Kirk,WR,241.7,215.1,171.1,
 Malachi Fields,WR,242.4,214.4,169.9,
 Malik Washington,WR,,180.1,170.1,
-Dontayvion Wicks,WR,,186.9,170.7,
+Dontayvion Wicks,WR,,186.9,170.6,
 Cyrus Allen,WR,,201.3,169.6,
 Tyquan Thornton,WR,,210.8,170.1,
 Caleb Douglas,WR,,214.0,170.3,
@@ -724,9 +724,9 @@ Kadarius Toney,WR,,,169.9,
 Jakobie Keeney-James,WR,,,169.9,
 Dont'e Thornton Jr.,WR,,,169.9,
 Charlie Jones,WR,,,169.9,
+Cedrick Wilson Jr.,WR,,,169.9,
 Theo Wease Jr.,WR,,,170.0,129.6
 Calvin Austin III,WR,,,170.0,
-Cedrick Wilson Jr.,WR,,,170.0,
 Jaylin Lane,WR,,,170.0,
 Ashton Dulin,WR,,,170.0,
 Kevin Coleman Jr.,WR,,,170.0,

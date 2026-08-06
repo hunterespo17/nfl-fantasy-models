@@ -479,6 +479,27 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .sortsel{font:inherit;font-size:13px;padding:6px 9px;border:1px solid var(--border);border-radius:9px;background:var(--surface-1);color:var(--ink)}
   .ov{display:grid;grid-template-columns:132px 1fr;gap:8px 14px;font-size:14px;color:var(--ink-2)}
   .ov .ovh{color:var(--ink);font-weight:600}
+  /* --- the range of outcomes ---------------------------------------------
+     A range is a magnitude WITH a position inside it, so it gets one track
+     and one marker rather than three numbers in a row. The track is the whole
+     range floor-to-ceiling; the marker is where the projection sits in it,
+     which is usually left of centre because seasons go wrong in more ways
+     than they go right. Greyed out where the range is extrapolated past the
+     depth it was measured to, so a soft number never looks like a hard one. */
+  .rngt{position:relative;height:8px;border-radius:4px;background:var(--accent-soft);
+        margin:24px 0 6px;max-width:330px}
+  .rngm{position:absolute;top:-3px;width:3px;height:14px;border-radius:2px;
+        background:var(--accent);box-shadow:0 0 0 2px var(--surface-1);transform:translateX(-1.5px)}
+  .rngv{position:absolute;top:-22px;transform:translateX(-50%);white-space:nowrap;
+        font-size:12.5px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+  .rngv span{font-weight:500;color:var(--muted);font-size:10.5px;letter-spacing:.04em}
+  .rngn{display:flex;justify-content:space-between;max-width:330px;font-size:12px;
+        color:var(--ink-2);font-variant-numeric:tabular-nums}
+  .rngn span{color:var(--muted);font-size:10.5px;letter-spacing:.04em}
+  .rngc{font-size:11.5px;line-height:1.55;color:var(--muted);margin-top:6px;max-width:430px}
+  .rng.soft .rngt{background:var(--grid)} .rng.soft .rngm{background:var(--baseline)}
+  /* the season floor/ceiling repeated small under the badge in the table */
+  .sub{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:3px}
   /* League-winner checklist: fixed published bars, pass/fail/not-measured. */
   .lw{display:flex;flex-direction:column;gap:3px}
   .lwr{display:grid;grid-template-columns:16px 1fr auto;gap:8px;align-items:baseline;font-size:13px}
@@ -1850,16 +1871,53 @@ function tierLine(o){
     `background:${tierColor(t)};margin-right:6px;vertical-align:1px"></span>Tier ${t} `+
     `<span style="color:var(--muted)">(${i.n===1?"alone in it":i.n+" "+POSPL+" the model can't separate"})</span>`;
 }
+/* --- how wrong is this number likely to be? -------------------------------
+   The projection at the top of the row is the MIDDLE of a distribution and the
+   distribution is wide, so it gets drawn rather than implied. Measured on 929
+   real drafted seasons since 2020: what a man drafted at this slot actually
+   scored, against what the slot has historically paid, read at the tenth and
+   ninetieth percentile. Then widened or tightened by how durable he reads --
+   availability moves the WIDTH of the range and never the middle of it, which
+   is the same call src/availability.py made for its own reasons.
+
+   Nothing here touches the projection. See src/outcomes.py for the table and
+   for why there is no rookie term in it. */
+function rangeLine(o){
+  if(o.season_mid==null||o.season_floor==null||o.season_ceil==null)return "";
+  const f=o.season_floor,m=o.season_mid,c=o.season_ceil;
+  const at=c>f?Math.max(7,Math.min(93,100*(m-f)/(c-f))):50;
+  const soft=!o.range_measured;
+  const odds=(o.bust_odds!=null&&o.boom_odds!=null&&!soft)
+    ? ` About <b>${o.bust_odds}%</b> of them came in under 60% of that price, <b>${o.boom_odds}%</b> beat it by 40% or more.` : "";
+  const cap=soft
+    ? `He goes later than the range was measured to, so this is the shape of the deepest band that was measured — read it as a rough width, not as his numbers.`
+    : `Tenth to ninetieth percentile of what ${POSPL} drafted around here really scored, 2020&#8211;2025.${odds}`;
+  return `<div class="ovh">Range of outcomes</div>
+    <div class="rng${soft?" soft":""}">
+      <div class="rngt"><span class="rngv" style="left:${at.toFixed(1)}%">${fmt(m,0)} <span>PROJECTED</span></span>
+        <span class="rngm" style="left:${at.toFixed(1)}%"></span></div>
+      <div class="rngn"><div>${fmt(f,0)} <span>FLOOR</span></div><div><span>CEILING</span> ${fmt(c,0)}</div></div>
+      <div class="rngc">${cap}</div></div>`;
+}
+/* The season number repeated small under the badge in the table. The badge is a
+   weekly read ranked inside the position; the number is a whole season in real
+   points. Both answer "how bad / how good can this go", at two different zoom
+   levels, so they share a column and the panel says which is which. */
+function seasonSub(x,k){
+  const v=x[k];
+  if(v==null)return "";
+  return `<div class="sub"${x.range_measured?"":' style="opacity:.55"'}>${fmt(v,0)}</div>`;
+}
 function overlays(o){
   return `<div class="ov" style="margin:2px 0 16px">
     <div class="ovh">Draft slot (ADP)</div><div>${adpTable(o)}</div>
     ${gamesLine(o)}
     ${platEdgeLine(o)}
     <div class="ovh">Worth the pick?</div><div>${valuePointsLine(o)}</div>
+    ${rangeLine(o)}
     ${(o.lw_checks&&o.lw_checks.length)
       ? `<div class="ovh">League-winner shape</div><div>${lwChecklist(o)}</div>` : ""}
-    <div class="ovh">Floor</div><div>${bdg(o.floor_bucket,FCLS[o.floor_bucket])} <span style="color:var(--muted)">bad-week baseline ≈ ${fmt(o.floor_pts,1)} pts/gm</span></div>
-    <div class="ovh">Ceiling</div><div>${bdg(o.ceiling_bucket,CCLS[o.ceiling_bucket])} <span style="color:var(--muted)">${o.boom25!=null?o.boom25:"–"}% of games ${BOOM[0]}+, ${o.boom30!=null?o.boom30:"–"}% ${BOOM[1]}+</span></div>
+    <div class="ovh">Week to week</div><div>${bdg(o.floor_bucket,FCLS[o.floor_bucket])} floor <span style="color:var(--muted)">— bad-week baseline ≈ ${fmt(o.floor_pts,1)} pts/gm</span><br>${bdg(o.ceiling_bucket,CCLS[o.ceiling_bucket])} ceiling <span style="color:var(--muted)">— ${o.boom25!=null?o.boom25:"–"}% of games ${BOOM[0]}+, ${o.boom30!=null?o.boom30:"–"}% ${BOOM[1]}+</span></div>
     <div class="ovh">Risk at ADP</div><div>${bdg(o.risk_bucket,RCLS[o.risk_bucket])} <span style="color:var(--muted)">${riskWhy(o)}</span></div>
     <div class="ovh">Tier / VOR</div><div>${tierLine(o)} <span style="color:var(--muted)">·</span> ${o._vor!=null?fmt(o._vor*17,0)+" pts over replacement (season)":"–"}</div>
   </div>`;
@@ -2598,8 +2656,8 @@ function refresh(){
       <td class="num"><span class="bartrack"><span class="bar" style="width:${w}px"></span></span>${fmt(x._p)}</td>
       ${PLATS.map(p=>`<td class="num pf">${pfRank(x,p)}</td>`).join("")}
       ${SHOW_MKT?`<td class="num mkt">${x._market?(POS+x._market):'<span style="color:var(--muted)">—</span>'}</td>`:""}
-      <td>${bdg(x.floor_bucket,FCLS[x.floor_bucket])}</td>
-      <td>${bdg(x.ceiling_bucket,CCLS[x.ceiling_bucket])}</td>
+      <td>${bdg(x.floor_bucket,FCLS[x.floor_bucket])}${seasonSub(x,"season_floor")}</td>
+      <td>${bdg(x.ceiling_bucket,CCLS[x.ceiling_bucket])}${seasonSub(x,"season_ceil")}</td>
       <td>${bdg(x.risk_bucket,RCLS[x.risk_bucket])}</td>
       <td class="whycol">${flagChips(x)}</td>
       <td class="num"><span class="caret">▸</span></td></tr>
@@ -2626,7 +2684,9 @@ function header(){
   const pf=PLATS.map(p=>`<th class="num${p===draftPlatform?" selcol":""}" title="${PLABEL[p]||p} ADP, as a ${POS} rank — green where he falls later than the market, red where he goes earlier">${PLABEL[p]||p}</th>`).join("");
   const mkt=SHOW_MKT?`<th class="num mkt" title="Market = average of ${mktWords()} ${POS} ranks, re-ranked 1..N. The site columns are scored against this.">Market</th>`:"";
   $("#thead").innerHTML=`<tr><th class="num">#</th><th>${POSLONG}</th><th class="num">Proj</th>${pf}${mkt}`+
-    `<th>Floor</th><th>Ceiling</th><th>Risk</th><th>Why</th><th></th></tr>`;
+    `<th title="Bad-week baseline, ranked inside the position. The small number is his tenth-percentile SEASON in real points — how a bad year actually reads on a scoreboard.">Floor</th>`+
+    `<th title="How often he goes big, ranked inside the position. The small number is his ninetieth-percentile SEASON in real points.">Ceiling</th>`+
+    `<th>Risk</th><th>Why</th><th></th></tr>`;
 }
 $("#search").oninput=refresh;
 $("#sortsel").onchange=e=>{sortMode=e.target.value;refresh();};
