@@ -841,6 +841,83 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .myturn{border:1px solid var(--accent);background:var(--accent-soft);border-radius:12px;
     padding:10px 14px;margin-top:12px;font-size:13.5px;font-weight:650;color:var(--ink)}
 
+  /* --- what to take -------------------------------------------------------
+     One name, big, with the reason under it in a sentence. The alternates are
+     small on purpose: three equal-weight suggestions is not a recommendation,
+     it is a menu, and a menu is what you already have below. */
+  .reco{margin-top:12px;border:1px solid var(--accent);border-radius:14px;
+    background:var(--surface-1);padding:14px 16px;
+    box-shadow:0 1px 2px rgba(0,0,0,.05),0 10px 26px -18px rgba(0,0,0,.5)}
+  .reco .rh{font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--accent);
+    text-transform:uppercase}
+  .reco .rn{font-size:21px;font-weight:800;margin-top:3px;letter-spacing:-.015em;line-height:1.2}
+  .reco .rn .pc{vertical-align:2px;margin-right:5px}
+  .reco .rw{font-size:13px;color:var(--ink-2);line-height:1.65;margin-top:6px;max-width:80ch}
+  .reco .rw b{color:var(--ink)}
+  .reco .ralt{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}
+  .reco .a{border:1px solid var(--border);background:var(--plane);border-radius:10px;
+    padding:6px 11px;font-size:12.5px;color:var(--ink-2)}
+  .reco .a b{color:var(--ink);font-weight:700}
+  .reco .rplan{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;padding-top:11px;
+    border-top:1px solid var(--border);align-items:center}
+  .reco .p{font-size:11.5px;border:1px solid var(--border);background:var(--plane);
+    border-radius:999px;padding:4px 10px;font-weight:650;color:var(--ink-2);white-space:nowrap}
+  .reco .p.done{border-color:var(--good);color:var(--good);
+    background:color-mix(in srgb,var(--good) 8%,transparent)}
+  .reco .p.due{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+  .reco .p.shut{opacity:.6}
+  .reco .plab{font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--muted);
+    text-transform:uppercase;margin-right:2px}
+
+  /* --- board + roster rail ------------------------------------------------
+     The rail is sticky so the roster stays put while you scroll two hundred
+     rows. It stops being a column under 1100px, because a 320px rail beside a
+     board that already scrolls sideways is worse than no rail. */
+  .dgrid{display:grid;grid-template-columns:minmax(0,1fr) 282px;gap:16px;align-items:start}
+  @media(max-width:1100px){.dgrid{grid-template-columns:minmax(0,1fr)}
+    .drailc{position:static;max-height:none}}
+  .dgrid>*{min-width:0}
+  .drailc{position:sticky;top:114px;max-height:calc(100vh - 132px);overflow:auto;padding:14px 16px}
+  .rslots{display:flex;flex-direction:column;gap:4px;margin-top:11px}
+  .rslot{display:flex;align-items:center;gap:9px;padding:6px 10px;border-radius:9px;
+    border:1px solid var(--border);background:var(--plane);font-size:13px;min-height:33px}
+  .rslot .sl{font-size:9.5px;font-weight:800;letter-spacing:.05em;color:var(--muted);
+    flex:0 0 38px;text-transform:uppercase}
+  .rslot .nm{font-weight:650;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rslot .rd{margin-left:auto;font-size:10.5px;color:var(--muted);font-weight:700;flex:0 0 auto}
+  .rslot.full{background:var(--surface-1)}
+  .rslot.open .nm{color:var(--muted);font-weight:500}
+  .rslot.bench{opacity:.66;min-height:29px;padding:4px 10px}
+  .rslot.dead{opacity:.45}
+  .rsep{font-size:9.5px;font-weight:800;letter-spacing:.07em;color:var(--muted);
+    text-transform:uppercase;margin:9px 0 2px}
+
+  /* --- tier ends down the board ------------------------------------------- */
+  tr.tsep td{padding:4px 10px 5px;background:transparent;border-bottom:1px solid var(--border);
+    font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+  tr.tsep td::before{content:"";display:inline-block;width:16px;height:2px;border-radius:2px;
+    background:currentColor;vertical-align:middle;margin-right:8px;opacity:.5}
+  tr.tsep.QB td{color:#2f6fbf} tr.tsep.RB td{color:#128054}
+  tr.tsep.WR td{color:#a35c19} tr.tsep.TE td{color:#7f3aa4}
+
+  /* --- the site you're drafting on ---------------------------------------- */
+  td.site{font-variant-numeric:tabular-nums;font-weight:700}
+  /* nowrap, and the cell says so too. Left to wrap, four site chips stack into a
+     column and every row on the board grows to 110px tall. */
+  .sites{display:inline-flex;gap:4px;flex-wrap:nowrap;justify-content:flex-end}
+  th.sitesh,td.sitesc{white-space:nowrap}
+  .sites{gap:3px}
+  .sites .s{font-size:9.5px;font-weight:700;color:var(--muted);border:1px solid var(--border);
+    border-radius:6px;padding:1px 3px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .sites .s i{font-style:normal;opacity:.7;margin-right:2px}
+  /* One line per player on the draft board. Wrapped, the name and the team sit on
+     two lines and every row is 68px tall, which is twenty rows a screen instead
+     of thirty on the one page you scroll most. */
+  #dfttbl td.qb{white-space:nowrap;max-width:288px;overflow:hidden;text-overflow:ellipsis}
+  #draft.dday #dfttbl td.qb{max-width:none}
+  .tgt{font-size:12px;font-weight:750;white-space:nowrap}
+  .tgt .w{color:var(--muted);font-weight:600}
+
   /* --- draft-day mode ----------------------------------------------------
      Not a different page: the same board with everything you do not read at
      speed taken away. Bigger type, three columns, no prose. It is a class on
@@ -861,6 +938,15 @@ _TEMPLATE = r"""<!DOCTYPE html>
   #draft.dday .myturn{font-size:16px;padding:14px 18px}
   #draft.dday .card{padding:16px 18px}
   #draft.dday tr.rdsep td{font-size:13px;padding:9px 12px}
+  /* The recommendation and the roster are the two things draft-day mode exists
+     for, so they get bigger here rather than being stripped out with the prose. */
+  #draft.dday .reco .rn{font-size:27px}
+  #draft.dday .reco .rw{font-size:15px}
+  #draft.dday .reco .a{font-size:13.5px;padding:7px 12px}
+  #draft.dday .rslot{font-size:15px;min-height:38px}
+  #draft.dday .rslot.bench{min-height:32px}
+  #draft.dday .drailc{top:100px}
+  #draft.dday tr.tsep td{font-size:12px;padding:6px 12px 7px}
 </style>
 </head>
 <body>
@@ -1339,10 +1425,14 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <strong>you start one quarterback and one tight end, but two or three backs and
         receivers</strong>, so the same points over replacement are not worth the same at
         every position. Left uncorrected this board took tight ends
-        <strong>thirty-two picks too early</strong>.</p>
+        <strong>thirty-two picks too early</strong>. Set <strong>Drafting on</strong> to the site
+        your league actually uses and every price here becomes that site's — which is the one
+        emptying the board in front of you.</p>
         <p class="note" id="dftprem" style="margin-top:10px"></p>
       </div>
       <div class="ctlrow">
+        <label class="note" style="margin:0">Drafting on&nbsp;
+          <select class="sortsel" id="dftplat"></select></label>
         <label class="note hidesm" style="margin:0">Pull toward the room&nbsp;
           <select class="sortsel" id="dftpull">
             <option value="0">None — our board only</option>
@@ -1357,15 +1447,25 @@ _TEMPLATE = r"""<!DOCTYPE html>
         <button class="tk" id="dftclear" type="button">Reset the board</button>
       </div>
       <div class="myturn" id="dftturn" hidden></div>
+      <div class="reco" id="dftreco" hidden></div>
       <div class="bav" id="dftbav"></div>
       <div class="cliffs" id="dftcliff"></div>
     </div>
-    <div class="card" id="mysquad" hidden>
-      <h2 style="margin:0 0 4px;font-size:17px">My team</h2>
-      <div class="rosters" id="mysquadbox" style="margin-top:10px"></div>
-    </div>
-    <div class="card" style="padding:14px 16px">
-      <div class="tblwrap"><table id="dfttbl"><thead id="dfthead"></thead><tbody id="dftbody"></tbody></table></div>
+    <!-- Board left, roster right. The roster is the one thing you want on screen
+         the whole time you are scrolling the board, so it is sticky rather than
+         parked at the top where it scrolls away by round three. -->
+    <div class="dgrid">
+      <div class="card" style="padding:14px 16px">
+        <div class="tblwrap"><table id="dfttbl"><thead id="dfthead"></thead><tbody id="dftbody"></tbody></table></div>
+      </div>
+      <aside class="card drailc" id="dftrail">
+        <div class="chead" style="gap:9px;align-items:center">
+          <h2 style="margin:0;font-size:15px;flex:0 0 auto">Roster</h2>
+          <select class="sortsel" id="rteam" style="flex:1 1 120px;min-width:0" aria-label="Which team's roster"></select>
+        </div>
+        <div class="rslots" id="rslots"></div>
+        <p class="note" id="rteamnote" style="margin-top:11px"></p>
+      </aside>
     </div>
     <p class="note hidesm" id="dftnote"></p>
   </section>
@@ -1448,7 +1548,7 @@ const POSPL_MAP={QB:"QBs",RB:"RBs",WR:"WRs",TE:"TEs"};
    a draft has a run of eight picks in ten seconds more often than you would
    think. */
 const MEM_KEY="nflmodels.board.v1";
-const MEM_DEF={taken:[],mine:[],league:null,slot:null,teams:null,names:{},ui:{}};
+const MEM_DEF={taken:[],mine:[],league:null,slot:null,teams:null,names:{},dpicks:{},ui:{}};
 let MEM=Object.assign({},MEM_DEF);
 try{
   const raw=localStorage.getItem(MEM_KEY);
@@ -3071,6 +3171,13 @@ function rebuildSelects(){
   $("#platsel").innerHTML='<option value="consensus">Consensus</option>'+
     PLATS.map(p=>`<option value="${p}">${PLABEL[p]||p}</option>`).join("");
   $("#platsel").value=draftPlatform;
+  /* The draft board's own copy. Built from the same list, but it keeps its
+     value across a board switch -- see dftPlat for why. A remembered site that
+     this file doesn't price falls back rather than sorting every row to 999. */
+  if(dftPlat!=="consensus"&&!PLATS.includes(dftPlat))dftPlat="consensus";
+  $("#dftplat").innerHTML='<option value="consensus">Consensus</option>'+
+    PLATS.map(p=>`<option value="${p}">${PLABEL[p]||p}</option>`).join("");
+  $("#dftplat").value=dftPlat;
   rebuildFilter();
   rebuildTeams();
 }
@@ -3276,6 +3383,15 @@ $("#bigsearch").oninput=bigRefresh;
 const DRAFT=Object.assign({premium:{},slope:{},pull:0.15,full:17,fitted:false},SITE.draft||{});
 const PULLWORD={"0":"off","0.15":"Light","0.25":"Moderate","0.35":"Strong","0.5":"Heavy"};
 let dftPull=Number(DRAFT.pull||0), dftPos="ALL", dftHide=false;
+/* Which site you are actually drafting on. Deliberately NOT the "Drafting on"
+   value the position tabs use: that one resets to Consensus every time you
+   switch board, which is right there and wrong here -- the site you draft on
+   doesn't change when you walk from the receivers to the backs. Held here and
+   remembered, because it re-bases the whole board: whose price the value and
+   reach flags are measured against, and whose price decides who is likely to
+   be gone before your next turn. */
+let dftPlat=((MEM.ui&&MEM.ui.plat)||"consensus");
+let rTeam=((MEM.ui&&MEM.ui.rteam)||"me");
 /* TAKEN and MINE are declared at the top of the script and restored from
    storage, so a board you crossed off on Tuesday is still crossed off on
    Sunday. The key is position plus folded name -- see nkey() up there for why
@@ -3295,12 +3411,27 @@ function dftSlope(pos,w){
   const s=(DRAFT.slope||{})[pos];
   return 1+(1-w)*((typeof s==="number"?s:1)-1);
 }
+/* The price this board runs on. On Consensus that is the blend of every site,
+   which is what bigRows already handed us. Pick a site and it becomes THAT
+   site's overall pick -- because if you are drafting on ESPN, ESPN's board is
+   the one emptying in front of you, and a value measured against a blend that
+   includes three sites nobody in your room can see is a value you can't act on. */
+function dftPrice(r){
+  if(dftPlat==="consensus")return {pick:r.mktpick,parked:r.mktparked};
+  const v=(r.x.adp_picks||{})[dftPlat];
+  return {pick:(v==null?null:v),parked:(v!=null&&v>=PARKED_AT)};
+}
 function dftRows(){
   const w=dftPull, full=DRAFT.full||17, prem=DRAFT.premium||{};
   const rows=bigRows();                      // vor here is per game
   rows.forEach(r=>{r.slope=dftSlope(r.pos,w);
     r.prem=(1-w)*((prem[r.pos]||0)/full);
-    r.val=r.slope*r.vor+r.prem;});
+    r.val=r.slope*r.vor+r.prem;
+    // Keep the blend under its own name before overwriting the working price,
+    // so the other-sites column can still show it and nothing downstream has to
+    // know which of the two it is looking at.
+    r.mktpick=r.pick; r.mktparked=r.parked;
+    const pr=dftPrice(r); r.pick=pr.pick; r.parked=pr.parked;});
   rows.slice().sort((a,b)=>b.val-a.val).forEach((r,i)=>{r.vrank=i+1;});
   // Market rank: everybody priced, in price order, then everybody unpriced behind
   // them -- 9999 and not Infinity, because Infinity minus Infinity is NaN and a
@@ -3312,15 +3443,66 @@ function dftRows(){
   rows.forEach((r,i)=>{r.rank=i+1; r.edge=r.pick==null?null:r.pick-r.rank;});
   return rows;
 }
+/* Ten columns now, and the colspan on every separator row is read off this one
+   constant. The last time these two drifted apart the round bars silently lost
+   a column and nobody noticed for a week. */
+const DCOL=10;
+function platLabel(){return dftPlat==="consensus"?"Market":(PLABEL[dftPlat]||dftPlat);}
 function dftHeader(){
+  const lab=platLabel();
+  const oth=dftPlat==="consensus"?"Sites":"Other sites";
   $("#dfthead").innerHTML=`<tr>`+
     `<th title="Somebody in the room took him"></th>`+
     `<th title="You took him"></th>`+
-    `<th class="num">#</th><th>Player</th>`+
-    `<th class="num">Proj</th>`+
-    `<th class="num hidesm" title="Points per game over replacement at his own position, scaled and shifted by this board's positional fit">Draft value</th>`+
-    `<th class="num" title="Average overall pick across the sites that really rank him">Market pick</th>`+
-    `<th class="hidesm" title="Where the market takes him against where this board takes him">Vs market</th></tr>`;
+    `<th class="num" title="Where this board would take him">Ours</th><th>Player</th>`+
+    `<th class="num hidesm">Proj</th>`+
+    `<th class="num hidesm" title="Points per game over replacement at his own position, scaled and shifted by this board's positional fit">Value</th>`+
+    `<th class="num" title="${dftPlat==="consensus"
+        ? "Average overall pick across the sites that really rank him"
+        : "The overall pick he goes at on "+lab+" — the site you're drafting on"}">${lab}</th>`+
+    `<th class="num hidesm sitesh" title="What the other sites pay for him, as overall picks">${oth==="Sites"?"Sites":"Others"}</th>`+
+    `<th class="num" title="Split the difference between where ${lab.toLowerCase()==="market"?"the room takes him":lab+" takes him"} and where this board has him. Bid around there and you usually get him without paying the full price.">Target</th>`+
+    `<th title="Where ${lab} takes him against where this board takes him. A full round of `+
+      `disagreement either way is what earns a label.">Vs ${lab}</th></tr>`;
+}
+/* One site's overall pick. A parked number is shown greyed rather than dashed:
+   "about 170th" is still worth more than nothing when the question is whether
+   he is worth a bench spot. */
+function siteNum(v){
+  if(v==null)return '<span class="mut">—</span>';
+  return v>=PARKED_AT
+    ? `<span class="mut" title="Parked rather than priced — read it as undrafted">${Math.round(v)}</span>`
+    : String(Math.round(v));
+}
+function otherSites(r){
+  const picks=r.x.adp_picks||{};
+  const keys=PLATS.filter(p=>p!==dftPlat&&picks[p]!=null);
+  if(!keys.length)return '<span class="mut">—</span>';
+  return `<span class="sites">`+keys.map(p=>{
+    const v=picks[p], lab=PLABEL[p]||p;
+    return `<span class="s" title="${lab}"><i>${lab.slice(0,2).toUpperCase()}</i>`+
+      `${v>=PARKED_AT?"—":Math.round(v)}</span>`;}).join("")+`</span>`;
+}
+/* --- target round --------------------------------------------------------
+   Hunter's rule, in one line: a man the room takes in the first and we have in
+   the third is a late-second bid. Halfway between the two, because bidding at
+   our number means never getting him and bidding at theirs means paying a price
+   we don't think he's worth. Deliberately independent of the pull dial -- the
+   dial moves the whole board's ORDER, this answers "when do I say his name",
+   and folding one into the other would double-count the same disagreement. */
+function targetPick(r){
+  if(r.pick==null)return null;
+  return 0.5*r.rank+0.5*r.pick;
+}
+function targetCell(r,teams){
+  const tp=targetPick(r);
+  if(tp==null)return `<span class="mut" title="No price on the site you're drafting on, so there is nothing to split the difference with">—</span>`;
+  const rd=Math.max(1,Math.ceil(tp/teams));
+  if(rd>ROUNDS)return `<span class="tgt"><span class="w">after ${ROUNDS}</span></span>`;
+  const within=tp-(rd-1)*teams;
+  const third=within<=teams/3?"early":within<=2*teams/3?"mid":"late";
+  return `<span class="tgt" title="${platLabel()} takes him ${Math.round(r.pick)}, this board has him ${r.rank}. `+
+    `Halfway is pick ${Math.round(tp)} — round ${rd}, ${third}.">R${rd} <span class="w">${third}</span></span>`;
 }
 /* The correction, in words, at whatever the dial is set to. Shape first, because
    it is the bigger of the two effects and much the less obvious one. */
@@ -3448,43 +3630,351 @@ function dftCliff(rows){
 }
 
 /* --- your team ----------------------------------------------------------
-   Two jobs: what you have, and what you still have to start. Starting spots
-   come from the linked league when there is one and from the model's own
-   default when there is not, so the "still needed" line is never a guess
-   dressed as a fact. */
+   Starting spots come from the linked league when there is one and from the
+   model's own default when there is not, so "you still need a tight end" is
+   never a guess dressed as a fact. The old "My team" card that used to render
+   from this is gone -- the roster rail beside the board says the same thing
+   better, and an empty RB slot IS "still to start" without a second list. */
 function myNeeds(){
   const lg=MEM.league;
   return (lg&&lg.starters)||{QB:1,RB:2,WR:2,TE:1,FLEX:1};
 }
-function mySquad(rows){
-  const box=$("#mysquad");
-  if(!MINE.size){box.hidden=true;return;}
-  box.hidden=false;
-  const mine=rows.filter(r=>MINE.has(dkey(r)));
-  const need=myNeeds(), have={};
-  mine.forEach(r=>{have[r.pos]=(have[r.pos]||0)+1;});
-  const short=ORDER.map(p=>{
-    const n=(need[p]||0)-(have[p]||0);
-    return n>0?`${n} more ${p}`:null;}).filter(Boolean);
-  const flex=Math.max(0,(need.FLEX||0)-Math.max(0,
-    ORDER.filter(p=>p!=="QB").reduce((t,p)=>t+Math.max(0,(have[p]||0)-(need[p]||0)),0)));
-  if(flex>0)short.push(`${flex} flex`);
-  const list=ORDER.flatMap(p=>mine.filter(r=>r.pos===p))
-    .map(r=>`<li><span>${r.pos}</span> ${r.x.name}</li>`).join("");
-  $("#mysquadbox").innerHTML=
-    `<div class="t me"><h4>${mine.length} player${mine.length===1?"":"s"}</h4><ul>${list}</ul></div>`+
-    `<div class="t"><h4>Still to start</h4>`+
-    (short.length?`<ul>${short.map(s=>`<li>${s}</li>`).join("")}</ul>`
-                 :`<ul><li>Your starting lineup is full.</li></ul>`)+`</div>`;
+/* --- the plan ------------------------------------------------------------
+   Hunter's draft rules, written down in one object so they can be argued with
+   rather than buried in an if-tree. Everything below reads from here, and the
+   chips under the recommendation report progress against these exact numbers.
+
+   These are HIS rules, not the model's. The model says what a player is worth;
+   the plan says what shape of roster he wants to end up with, and the two are
+   different questions. Where they disagree the plan bends the order by a fixed
+   number of picks rather than overruling it outright -- that is what keeps a
+   genuinely fallen player takeable in a round the plan would otherwise shut. */
+const PLAN={
+  rbBy2:2,        // two backs inside the first two rounds
+  rbBy6:3,        // three by the end of round six
+  wrBy:4,         // four receivers...
+  wrMax:5,        // ...five is still fine...
+  wrLast:9,       // ...and none after round nine
+  qbFrom:10,      // quarterback waits, unless he has fallen this far past his price
+  qbFallen:14,
+};
+/* Surname for the tight strip, minus the suffix. "Marvin Harrison Jr." coming
+   back as "Jr." is the kind of thing that survives review because everyone
+   reads the code and nobody reads the output. */
+const NSUFFIX=new Set(["jr","sr","ii","iii","iv"]);
+function shortName(n){
+  const parts=String(n||"").trim().split(/\s+/);
+  while(parts.length>1&&NSUFFIX.has(parts[parts.length-1].toLowerCase().replace(/\./g,"")))parts.pop();
+  return parts[parts.length-1]||String(n||"");
 }
+function haveNow(rows){
+  const h={QB:0,RB:0,WR:0,TE:0};
+  rows.forEach(r=>{if(MINE.has(dkey(r)))h[r.pos]=(h[r.pos]||0)+1;});
+  return h;
+}
+/* Starting spots you have not filled yet, one entry per empty spot. The flex is
+   counted last and swallowed by whatever you are over on, which is the same
+   convention the model's replacement level uses. */
+function stillToStart(have){
+  const need=myNeeds(), miss=[];
+  ORDER.forEach(p=>{for(let i=(have[p]||0);i<(need[p]||0);i++)miss.push(p);});
+  const spare=ORDER.filter(p=>p!=="QB")
+    .reduce((t,p)=>t+Math.max(0,(have[p]||0)-(need[p]||0)),0);
+  for(let i=spare;i<(need.FLEX||0);i++)miss.push("FLEX");
+  return miss;
+}
+function planCtx(avail,have,rd,atPick,nextTurn){
+  const miss=stillToStart(have), left=Math.max(1,ROUNDS-rd+1);
+  /* Fill-or-never. Two turns of slack, because landing your only tight end with
+     the last pick of the draft is technically legal and practically a wasted
+     season. */
+  const must=new Set(miss.length+2>=left?miss.filter(p=>p!=="FLEX"):[]);
+  return {left,atPick,nextTurn,must,miss,
+    lwRb:avail.filter(r=>r.pos==="RB"&&r.x.lw_gate).length};
+}
+/* How well he fits the plan, in picks of credit. Positive moves him up the
+   board, negative moves him down, block takes him out of the running entirely
+   unless nothing legal is left. */
+function planFit(r,rd,have,ctx){
+  const f=planFitRaw(r,rd,have,ctx);
+  /* Once every starting spot is filled the rules stop being gates. They were
+     written about how to BUILD a lineup — two backs early, receivers before
+     round ten, wait on the quarterback — and none of that is a statement about
+     who to put on your bench. On a bench pick the question is just who is the
+     best player left, with the plan's shape still leaning on it. */
+  if(f.block&&!ctx.miss.length)return {b:Math.max(f.b,-12),w:f.w};
+  return f;
+}
+function planFitRaw(r,rd,have,ctx){
+  const p=r.pos;
+  if(ctx.must.has(p))
+    return {b:40,w:`you still have no starting ${p} and only ${ctx.left} turn${ctx.left===1?"":"s"} left`};
+  /* Both of these are scored against a PACE rather than a flat bonus. "Three
+     backs by round six" with a fixed nudge either takes three in the first
+     three rounds or misses by two and never catches up; measured against where
+     you should be by now, falling behind makes the next one more urgent, which
+     is how the deadline actually works. */
+  if(p==="RB"){
+    const pace=rd<=2?PLAN.rbBy2:(rd<=6?PLAN.rbBy6:0);
+    const behind=Math.max(0,pace-(have.RB||0));
+    if(!behind)return {b:0,w:""};
+    return {b:6+6*behind,
+      w:`the plan wants ${pace} back${pace===1?"":"s"} by the end of round ${rd<=2?2:6} `+
+        `and you have ${have.RB||0}`};
+  }
+  if(p==="WR"){
+    if(rd>PLAN.wrLast)
+      return {b:-45,w:`the plan takes no receivers after round ${PLAN.wrLast}`,block:true};
+    const pace=Math.min(PLAN.wrBy,Math.ceil(PLAN.wrBy*rd/PLAN.wrLast));
+    const behind=Math.max(0,pace-(have.WR||0));
+    const n=have.WR||0;
+    if(behind)return {b:6+6*behind,
+      w:`you have ${n} receiver${n===1?"":"s"} and the plan wants ${PLAN.wrBy}–${PLAN.wrMax} `+
+        `by round ${PLAN.wrLast} — ${pace} of them by now`};
+    if(n<PLAN.wrMax)return {b:3,w:`a ${PLAN.wrMax}th receiver is still inside the plan`};
+    return {b:-10,w:`you already have ${n} receivers`};
+  }
+  if(p==="QB"){
+    if((have.QB||0)>=1)return {b:-30,w:"you already have your quarterback",block:true};
+    if(rd>=PLAN.qbFrom)return {b:10,w:`round ${rd} — this is where the plan takes a quarterback`};
+    const fall=(r.pick!=null&&ctx.atPick!=null)?Math.round(ctx.atPick-r.pick):0;
+    if(fall>=PLAN.qbFallen)
+      return {b:-3,w:`the plan waits on quarterback until round ${PLAN.qbFrom}, but he has slid `+
+        `${fall} picks past where ${platLabel()} takes him`};
+    return {b:-45,w:`the plan waits on quarterback until round ${PLAN.qbFrom}`,block:true};
+  }
+  /* The tight end gate, exactly as Hunter wrote it: wait while backs with
+     league-winning upside are still there. Worth knowing what that costs him --
+     that screen is built on CHEAP backs, so one of them is on the board into
+     round fifteen and this rule punts tight end most of the draft. Shut hard
+     while there are plenty, then eased into a heavy penalty rather than a wall,
+     so an elite tight end sliding thirty picks can still be taken late. The
+     starter override below guarantees he ends up with one either way. */
+  if(p==="TE"){
+    if((have.TE||0)>=1)return {b:-30,w:"you already have your tight end",block:true};
+    if(ctx.lwRb>=6)
+      return {b:-40,w:`${ctx.lwRb} backs with league-winning upside are still on the board — `+
+        `the plan waits at tight end until they're gone`,block:true};
+    if(ctx.lwRb>0)
+      return {b:-(6+3*ctx.lwRb),w:`${ctx.lwRb} back${ctx.lwRb===1?"":"s"} with league-winning `+
+        `upside ${ctx.lwRb===1?"is":"are"} still there, so the plan is still leaning away from tight end`};
+    return {b:8,w:"the backs with league-winning upside are gone, which is when the plan opens tight end"};
+  }
+  return {b:0,w:""};
+}
+/* Score in picks: our board order, moved by the plan and by whether he survives
+   your wait. Lowest wins. Keeping it in picks is the whole point -- "we'd move
+   him up eight spots" is a sentence you can check, "score 41.7" is not. */
+function recoScore(r,rd,have,ctx){
+  const f=planFit(r,rd,have,ctx);
+  let s=r.rank-f.b, wait="";
+  if(ctx.nextTurn!=null){
+    if(r.pick==null){s+=8;wait=`nobody prices him, so he should keep`;}
+    else if(r.pick>=ctx.nextTurn+2){
+      s+=6;wait=`${platLabel()} has him going ${Math.round(r.pick)}, past your next turn at ${ctx.nextTurn}, so he should keep`;}
+    else if(r.pick<ctx.nextTurn){
+      s-=5;
+      // Already past his price is a different fact from "goes before your next
+      // turn", and it is the more useful one: he is falling, not merely popular.
+      wait=(ctx.atPick!=null&&r.pick<ctx.atPick)
+        ? `he has already slid past his ${platLabel()} price of ${Math.round(r.pick)}, so he `+
+          `will not still be there at ${ctx.nextTurn}`
+        : `he usually goes ${Math.round(r.pick)} and your next turn is ${ctx.nextTurn}, so this is your shot`;}
+  }
+  return {r,s,f,wait};
+}
+function bestOf(avail,rd,have,ctx,n){
+  const scored=avail.slice(0,90).map(r=>recoScore(r,rd,have,ctx));
+  const open=scored.filter(o=>!o.f.block);
+  const use=(open.length?open:scored).sort((a,b)=>a.s-b.s);
+  return use.slice(0,n||1);
+}
+/* Every turn you have left, taken greedily. Between your turns the room takes
+   everyone it prices ahead of your next pick, so the pool thins the way it
+   really will. It is a forecast off an average and it says so on the page --
+   but "round 4 is where your third back comes from" is a thing worth knowing
+   in round 1, and no amount of staring at a 349-row board tells you it. */
+function planAhead(all,limit){
+  const t=bigTeams(), made=picksMade();
+  const turns=myPicks().filter(n=>n>made);
+  if(!turns.length)return [];
+  const gone=new Set(TAKEN), have=haveNow(all), out=[];
+  turns.slice(0,limit||ROUNDS).forEach((np,i)=>{
+    const rd=Math.ceil(np/t), nextTurn=turns[i+1]??null;
+    // At your NEXT pick the board is what it is; further out, the room has also
+    // taken everyone it prices before you get there.
+    const avail=all.filter(r=>!gone.has(dkey(r))&&(i===0||r.pick==null||r.pick>=np));
+    const ctx=planCtx(avail,have,rd,np,nextTurn);
+    const best=bestOf(avail,rd,have,ctx,1)[0];
+    if(!best){out.push({np,rd,o:null});return;}
+    gone.add(dkey(best.r)); have[best.r.pos]=(have[best.r.pos]||0)+1;
+    out.push({np,rd,o:best});
+  });
+  return out;
+}
+/* Progress against the plan, as chips. Green when a rule is satisfied, accent
+   when it is the one biting right now, faded when the window has shut. */
+function planChips(have,rd,ctx){
+  const c=[];
+  const rb=have.RB||0, wr=have.WR||0;
+  c.push({t:`RB ${rb}/${PLAN.rbBy6}`,
+    k:rb>=PLAN.rbBy6?"done":(rd<=6?"due":"shut"),
+    h:`Two by the end of round 2, three by the end of round 6.`});
+  c.push({t:`WR ${wr}/${PLAN.wrBy}`,
+    k:wr>=PLAN.wrBy?"done":(rd<=PLAN.wrLast?"due":"shut"),
+    h:`Four to five, all of them by round ${PLAN.wrLast}.`});
+  c.push({t:`QB ${have.QB||0}/1`,
+    k:(have.QB||0)>=1?"done":(rd>=PLAN.qbFrom?"due":"shut"),
+    h:`Wait until round ${PLAN.qbFrom} unless one slides ${PLAN.qbFallen}+ picks past his price.`});
+  c.push({t:`TE ${have.TE||0}/1`,
+    k:(have.TE||0)>=1?"done":(ctx.lwRb>0?"shut":"due"),
+    h:ctx.lwRb>0?`Your rule waits at tight end while backs with league-winning upside are `+
+        `on the board, and ${ctx.lwRb} still ${ctx.lwRb===1?"is":"are"} — that screen is built `+
+        `on cheap backs, so in practice this punts tight end to the back end of the draft.`
+      :`The backs with league-winning upside are gone, so tight end is open.`});
+  return `<span class="plab">Plan</span>`+
+    c.map(x=>`<span class="p ${x.k}" title="${x.h}">${x.t}</span>`).join("");
+}
+function dftReco(all){
+  const el=$("#dftreco"), t=bigTeams();
+  const made=picksMade(), slot=mySlot();
+  const np=slot?nextPick():made+1;
+  const avail=all.filter(r=>!TAKEN.has(dkey(r)));
+  if(np==null||!avail.length){el.hidden=true;return;}
+  const rd=Math.ceil(np/t), have=haveNow(all);
+  const turns=slot?myPicks().filter(n=>n>made):[];
+  const ctx=planCtx(avail,have,rd,np,slot?(turns[1]??null):null);
+  const top=bestOf(avail,rd,have,ctx,3);
+  if(!top.length){el.hidden=true;return;}
+  const b=top[0];
+  const bits=[];
+  if(b.r.rank===avail[0].rank)bits.push("he is the best man left on the board");
+  if(b.f.w)bits.push(b.f.w);
+  if(b.wait)bits.push(b.wait);
+  // If the plan is actively holding a better player back, say so by name. That
+  // is the sentence that stops you overriding a rule you set for good reason --
+  // or tells you plainly what you are overriding when you do it anyway.
+  const blocked=avail.slice(0,40).map(r=>recoScore(r,rd,have,ctx))
+    .filter(o=>o.f.block&&o.r.rank<b.r.rank).sort((a,b2)=>a.r.rank-b2.r.rank)[0];
+  const hold=blocked?` <b>${blocked.r.x.name}</b> is higher on the board, but ${blocked.f.w}.`:"";
+  // Alternates carry numbers, not the reason -- they share the top man's reason,
+  // and three copies of one sentence reads as a stutter rather than a choice.
+  const alts=top.slice(1).map(o=>`<span class="a"><b>${o.r.x.name}</b> ${o.r.pos} · `+
+    `board ${o.r.rank}${o.r.pick!=null?`, ${platLabel()} ${Math.round(o.r.pick)}`:""}</span>`).join("");
+  const ahead=slot?planAhead(all,6).slice(1):[];
+  const aheadLine=ahead.length
+    ? `<div class="rplan"><span class="plab">Then</span>`+
+      ahead.map(a=>`<span class="p" title="${a.o?a.o.r.x.name+" — pick "+a.np:"pick "+a.np}">R${a.rd} `+
+        `${a.o?shortName(a.o.r.x.name)+" · "+a.o.r.pos:"—"}</span>`).join("")+`</div>`
+    : "";
+  el.hidden=false;
+  el.innerHTML=
+    `<div class="rh">${slot?`Pick ${np} · round ${rd} — take`:`Round ${rd} — take`}</div>`+
+    `<div class="rn"><span class="pc ${b.r.pos}">${b.r.pos}</span>${b.r.x.name}`+
+      `<span class="mut" style="font-size:13px;font-weight:600"> · ${b.r.x.team||""} · board ${b.r.rank}`+
+      `${b.r.pick!=null?` · ${platLabel()} ${Math.round(b.r.pick)}`:""}</span></div>`+
+    `<div class="rw">${bits.length?bits.join(", and ").replace(/^./,c=>c.toUpperCase())+"."
+      :"Nothing in the plan points anywhere else right now."}${hold}</div>`+
+    (alts?`<div class="ralt">${alts}</div>`:"")+
+    `<div class="rplan">${planChips(have,rd,ctx)}</div>`+
+    aheadLine;
+}
+
+/* --- the roster rail -----------------------------------------------------
+   Slots come from the linked league when there is one, so a superflex or a
+   third receiver spot shows up as a real hole rather than being quietly folded
+   into the bench. Unlinked, it is the model's own default lineup. */
+const DEFSLOTS=["QB","RB","RB","WR","WR","TE","FLEX","BN","BN","BN","BN","BN","BN","BN","BN","BN"];
+const SLOTFIT={FLEX:["RB","WR","TE"],WRRB_FLEX:["RB","WR"],REC_FLEX:["WR","TE"],
+  SUPER_FLEX:["QB","RB","WR","TE"]};
+const SLOTNAME={SUPER_FLEX:"SFLX",WRRB_FLEX:"FLEX",REC_FLEX:"RFLX",BN:"BN",IR:"IR",TAXI:"TX",DEF:"DST"};
+function rosterSlots(){
+  const lg=MEM.league;
+  const s=(lg&&Array.isArray(lg.slots)&&lg.slots.length)?lg.slots.slice():DEFSLOTS.slice();
+  return s.filter(x=>x!=="TAXI"&&x!=="IR");
+}
+function fillRoster(players){
+  const slots=rosterSlots().map(s=>({s,who:null}));
+  players.forEach(p=>{
+    // Exact spot first, then a flex that takes him, then the bench. Filling the
+    // flex with your second back while the RB2 spot sits open reads as a hole
+    // you don't have.
+    let i=slots.findIndex(z=>!z.who&&z.s===p.pos);
+    if(i<0)i=slots.findIndex(z=>!z.who&&SLOTFIT[z.s]&&SLOTFIT[z.s].includes(p.pos));
+    if(i<0)i=slots.findIndex(z=>!z.who&&z.s==="BN");
+    if(i<0){slots.push({s:"BN",who:p});return;}
+    slots[i].who=p;
+  });
+  return slots;
+}
+/* Who is on a team. "me" works with or without a live draft: linked, it is the
+   feed; by hand, it is the men you starred, in the order you starred them --
+   which IS your pick order, as long as you star them as you take them. */
+function teamPlayers(which,all){
+  const t=bigTeams();
+  if(which==="me"){
+    const live=(MEM.dpicks||{})[String(mySlot()||"")];
+    if(live&&live.length)return live;
+    const byKey={}; all.forEach(r=>{byKey[dkey(r)]=r;});
+    const picks=myPicks();
+    return [...MINE].map((k,i)=>{const r=byKey[k]; if(!r)return null;
+      return {name:r.x.name,pos:r.pos,round:picks.length?Math.ceil(picks[i]/t):i+1};}).filter(Boolean);
+  }
+  return ((MEM.dpicks||{})[String(which)]||[]);
+}
+function rosterTeamList(){
+  const lg=MEM.league, out=[{v:"me",t:"My team"}];
+  const ord=lg&&lg.draft_order;
+  if(ord){
+    Object.keys(ord).map(uid=>({uid,slot:Number(ord[uid])}))
+      .filter(o=>o.slot>0).sort((a,b)=>a.slot-b.slot)
+      .forEach(o=>{
+        if(mySlot()&&o.slot===mySlot())return;      // that one is "My team"
+        out.push({v:String(o.slot),t:`${o.slot} · ${(lg.owners||{})[o.uid]||"Team "+o.slot}`});
+      });
+  }
+  return out;
+}
+function rosterRefresh(all){
+  const list=rosterTeamList();
+  if(!list.some(o=>o.v===rTeam))rTeam="me";
+  $("#rteam").innerHTML=list.map(o=>`<option value="${o.v}">${o.t}</option>`).join("");
+  $("#rteam").value=rTeam;
+  $("#rteam").disabled=list.length<2;
+  const players=teamPlayers(rTeam,all);
+  const slots=fillRoster(players);
+  let benched=false;
+  $("#rslots").innerHTML=slots.map(z=>{
+    const bn=z.s==="BN", lab=SLOTNAME[z.s]||z.s;
+    const head=(bn&&!benched)?(benched=true,`<div class="rsep">Bench</div>`):"";
+    const dead=(z.s==="K"||z.s==="DEF");
+    const cls=`rslot${z.who?" full":" open"}${bn?" bench":""}${dead?" dead":""}`;
+    const nm=z.who?z.who.name:(dead?"not on this board":"—");
+    const rd=z.who&&z.who.round?`R${z.who.round}`:"";
+    return head+`<div class="${cls}"><span class="sl">${lab}</span>`+
+      `<span class="nm">${nm}</span><span class="rd">${rd}</span></div>`;
+  }).join("");
+  const n=players.length;
+  $("#rteamnote").innerHTML=rTeam==="me"
+    ? (n?`${n} player${n===1?"":"s"}. ${(MEM.dpicks&&MEM.dpicks[String(mySlot()||"")])
+        ? "Filled from your live draft."
+        : "Filled from the men you starred, in the order you starred them."}`
+       :`Nobody yet. Star a player with ☆ on the board as you take him — or link your `+
+        `league above and follow the draft, and this fills itself.`)
+    : (n?`${n} player${n===1?"":"s"}, from the live draft feed.`
+       :`Nothing from this team yet. Other teams only fill in while you're following a live draft.`);
+}
+
 function dftRefresh(){
   const teams=bigTeams(), q=($("#dftsearch").value||"").trim().toLowerCase();
   const all=dftRows();
+  dftHeader();          // half its cells are named after the site you're drafting on
   dftPrem();
   dftBav(all);
   dftTurn(all);
+  dftReco(all);
   dftCliff(all);
-  mySquad(all);
+  rosterRefresh(all);
   const np=nextPick(), fading=goneBy(all,np);
   // Best remaining tier per position, so the row chip can say "last of tier 2"
   // -- the one tier fact that changes a pick, rather than a number you have to
@@ -3502,15 +3992,48 @@ function dftRefresh(){
   // Round bars only in the board's own order -- under a search or a position
   // filter the rows aren't in pick order and a "ROUND 3" bar would be a lie.
   const rule=(dftPos==="ALL"&&!q);
+  /* Where each position tier runs out, keyed by the board rank of its last man.
+     Static -- it marks the boundary, it does not chase the picks -- but the
+     label counts who is still standing, so mid-draft it reads "3 of 5 left"
+     and you can see the group emptying without the line jumping around under
+     your finger. Tiers of one are skipped: a rule under a single row is just a
+     rule, and the row already wears its T1 chip. */
+  const tierEnd={};
+  if(rule){
+    const grp={};
+    all.forEach(r=>{const t=r.x.tier; if(t==null)return;
+      (grp[r.pos+"|"+t]=grp[r.pos+"|"+t]||[]).push(r);});
+    Object.keys(grp).forEach(k=>{
+      const list=grp[k];
+      const last=list.reduce((a,b)=>a.rank>b.rank?a:b);
+      if(last.rank>ROUNDS*teams)return;      // past the end of the draft, nobody cares
+      const bits=k.split("|");
+      tierEnd[last.rank]={pos:bits[0],tier:bits[1],n:list.length,
+        left:list.filter(z=>!TAKEN.has(dkey(z))).length};
+    });
+  }
   let seen=0;
   $("#dftbody").innerHTML=rows.map(r=>{
     const rd=Math.ceil(r.rank/teams);
-    const bar=(rule&&rd>seen)?(seen=rd,`<tr class="rdsep"><td colspan="8">Round ${rd}</td></tr>`):"";
+    const bar=(rule&&rd>seen)?(seen=rd,`<tr class="rdsep"><td colspan="${DCOL}">Round ${rd}</td></tr>`):"";
+    const te=tierEnd[r.rank];
+    const tend=te?`<tr class="tsep ${te.pos}"><td colspan="${DCOL}">end of ${te.pos} tier ${te.tier} · `+
+      (te.n===1?(te.left?"just the one, still there":"just the one, gone")
+               :`${te.left} of ${te.n} still on the board`)+`</td></tr>`:"";
+    /* A full round of disagreement is the cutoff, in both directions. It is the
+       smallest gap that survives being wrong about one pick, and it is a unit
+       Hunter can check against his own board rather than a tuned constant. */
     const ecls=r.edge==null?"":r.edge>=teams?"val":r.edge<=-teams?"rch":"";
+    // Short in the cell, the whole sentence in the tooltip. The long version of
+    // this ran to 200px and pushed the board into a sideways scroll.
     const eword=r.edge==null?'<span class="mut">—</span>'
-      :r.edge>=teams?`<span class="vt g">▲ lasts ${Math.round(r.edge)} picks longer</span>`
-      :r.edge<=-teams?`<span class="vt r">▼ goes ${Math.round(-r.edge)} picks earlier</span>`
-      :`<span class="mut">about where he's drafted</span>`;
+      :r.edge>=teams?`<span class="vt g" title="${platLabel()} lets him fall to pick ${Math.round(r.pick)} `+
+        `and this board wants him at ${r.rank} — he lasts ${Math.round(r.edge)} picks longer than he `+
+        `should">▲ VALUE +${Math.round(r.edge)}</span>`
+      :r.edge<=-teams?`<span class="vt r" title="${platLabel()} takes him at pick ${Math.round(r.pick)} `+
+        `and this board wants him at ${r.rank} — you'd be paying ${Math.round(-r.edge)} picks over`+
+        `">▼ REACH −${Math.round(-r.edge)}</span>`
+      :`<span class="mut" title="Inside a round of where this board has him">in line</span>`;
     const k=dkey(r), gone=TAKEN.has(k), mine=MINE.has(k);
     const flat=Math.abs(r.slope-1)<0.005, shift=Math.abs(r.prem)<0.005;
     const ptitle=(flat&&shift)?""
@@ -3531,11 +4054,13 @@ function dftRefresh(){
       <td class="tkc"><button class="tk mk" type="button" title="${mine?"He isn't mine after all":"I took him"}">${mine?"★":"☆"}</button></td>
       <td class="rank num">${r.rank}</td>
       <td class="qb"><span class="pc ${r.pos}">${r.pos}</span> <b>${r.x.name}</b>${teamCell(r.x.team)}${chip}</td>
-      <td class="num">${fmt(r.proj,1)}</td>
+      <td class="num hidesm">${fmt(r.proj,1)}</td>
       <td class="num vor${r.val<0?" neg":""} hidesm"${ptitle}>${r.val>0?"+":""}${fmt(r.val,1)}</td>
-      <td class="num">${pickCell(r)}</td>
-      <td class="rd ${ecls} hidesm">${eword}</td></tr>`;
-  }).join("")||`<tr><td colspan="8" class="note">Nobody matches that.</td></tr>`;
+      <td class="num site">${pickCell(r)}</td>
+      <td class="num hidesm sitesc">${otherSites(r)}</td>
+      <td class="num">${targetCell(r,teams)}</td>
+      <td class="rd ${ecls}">${eword}</td></tr>`+tend;
+  }).join("")||`<tr><td colspan="${DCOL}" class="note">Nobody matches that.</td></tr>`;
 
   $("#dftbody").querySelectorAll("tr.row").forEach(tr=>{
     tr.onclick=()=>jumpTo(tr.dataset.bpos,tr.dataset.id);
@@ -3556,8 +4081,12 @@ function dftRefresh(){
   });
   const src=LIVE.on?"Sleeper is crossing them off as the room picks."
     :"Crossing a man off is saved in this browser, so a refresh keeps your board.";
-  $("#dftnote").textContent=`${rows.length} players shown, ${TAKEN.size} off the board, `+
-    `${MINE.size} on your team. Projections are per game. ${src}`;
+  $("#dftnote").innerHTML=`${rows.length} players shown, ${TAKEN.size} off the board, `+
+    `${MINE.size} on your team. Projections are per game. <b>Ours</b> is where this board `+
+    `takes him; <b>${platLabel()}</b> is the overall pick he goes at on the site you're `+
+    `drafting on, and value and reach are measured against that one site, not a blend. `+
+    `<b>Target</b> splits the difference between the two — bid there and you usually get `+
+    `him without paying his full price. ${src}`;
 }
 
 /* --- your league, via Sleeper -------------------------------------------
@@ -3702,6 +4231,9 @@ async function lgPick(lid,uid,season){
     MEM.league={league_id:lid,name:l.name,teams,repl,starters,user_id:uid,season,
       draft_id:dr?dr.draft_id:null,draft_status:dr?dr.status:null,
       scoring:l.scoring_settings||null,slots:l.roster_positions||[],
+      // The whole order, not only yours: it is what puts the other teams in the
+      // roster dropdown in the seat order you actually see them draft in.
+      draft_order:(dr&&dr.draft_order)?dr.draft_order:null,
       owners:names,
       rosters:(rosters||[]).map(r=>({owner:r.owner_id,rid:r.roster_id,players:r.players||[]}))};
     if(slot){MEM.slot=slot;$("#lgslot").value=String(slot);}
@@ -3812,16 +4344,27 @@ async function livePoll(){
     LIVE.fails=0;
     let added=0, missed=0;
     MEM.names=MEM.names||{};
+    /* Every team's picks, filed under the seat they picked from. Kickers and
+       defences go in here too even though this board doesn't rank them --
+       leaving them out would show a team with nine players as having seven,
+       and the roster panel is supposed to be what happened, not what we cover. */
+    const bySlot={};
     picks.forEach(p=>{
       const m=p.metadata||{};
       if(p.player_id&&m.first_name)MEM.names[p.player_id]=`${m.first_name} ${m.last_name||""}`.trim();
       const pos=String(m.position||"").toUpperCase();
+      const nm=`${m.first_name||""} ${m.last_name||""}`.trim();
+      const sl=String(p.draft_slot==null?"":p.draft_slot);
+      if(sl)(bySlot[sl]=bySlot[sl]||[]).push({name:nm||"—",pos,
+        round:Number(p.round)||null,no:Number(p.pick_no)||null});
       if(!ORDER.includes(pos))return;                 // kickers and defences aren't on this board
-      const k=pos+"|"+nkey(`${m.first_name||""} ${m.last_name||""}`);
+      const k=pos+"|"+nkey(nm);
       if(!DKEYS.has(k)){missed++;return;}
       if(!TAKEN.has(k)){TAKEN.add(k);added++;}
       if(lg&&p.picked_by&&p.picked_by===lg.user_id)MINE.add(k);
     });
+    Object.keys(bySlot).forEach(s=>bySlot[s].sort((a,b)=>(a.no||0)-(b.no||0)));
+    MEM.dpicks=bySlot;
     memBoard();
     const done=picks.length;
     lgSay(`<span class="live"><i></i>Following your draft.</span> ${done} pick`+
@@ -3836,7 +4379,8 @@ async function livePoll(){
 
 function lgDrop(){
   liveStop();
-  MEM.league=null; MEM.teams=null; MEM.slot=null;
+  MEM.league=null; MEM.teams=null; MEM.slot=null; MEM.dpicks={};
+  rTeam="me"; MEM.ui=MEM.ui||{}; MEM.ui.rteam="me";
   saveMem();
   $("#lgteams").value=""; $("#lgslot").value="";
   $("#lgroster").hidden=true; $("#lgrosters").setAttribute("aria-pressed","false");
@@ -3861,6 +4405,18 @@ posChips($("#dftpos"),p=>{dftPos=(dftPos===p?"ALL":p);
 $("#dftpos").insertAdjacentHTML("afterbegin",'<span class="note" style="margin:0;padding:0 6px">Only&nbsp;</span>');
 $("#dftpull").value=String(dftPull);
 $("#dftpull").onchange=e=>{dftPull=Number(e.target.value);dftRefresh();};
+/* Changing the site you draft on re-bases the whole board, so this redraws the
+   header too -- half its cells are named after the site. */
+$("#dftplat").onchange=e=>{
+  dftPlat=e.target.value;
+  MEM.ui=MEM.ui||{}; MEM.ui.plat=dftPlat; saveMem();
+  dftRefresh();
+};
+$("#rteam").onchange=e=>{
+  rTeam=e.target.value;
+  MEM.ui=MEM.ui||{}; MEM.ui.rteam=rTeam; saveMem();
+  dftRefresh();
+};
 $("#dftsearch").oninput=dftRefresh;
 $("#dfthide").onchange=e=>{dftHide=e.target.checked;dftRefresh();};
 $("#dftclear").onclick=()=>{TAKEN.clear();MINE.clear();memBoard();dftRefresh();};
